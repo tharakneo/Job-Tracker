@@ -55,12 +55,22 @@ body {
 }
 
 .brand {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--text-primary);
   user-select: none;
   padding: 6px 14px 14px;
+  line-height: 1.3;
+}
+
+.brand-neo {
+  color: #e8e8ed;
+}
+
+.brand-jt {
+  color: #8bc58b;
+  font-weight: 500;
 }
 
 .sidebar-nav {

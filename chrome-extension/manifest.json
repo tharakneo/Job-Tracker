@@ -10,7 +10,13 @@
     ],
     "action": {
         "default_popup": "popup.html",
-        "default_title": "Save Job"
+        "default_title": "Save Job",
+        "default_icon": "icon.png"
+    },
+    "icons": {
+        "16": "icon.png",
+        "48": "icon.png",
+        "128": "icon.png"
     },
     "host_permissions": [
         "<all_urls>"

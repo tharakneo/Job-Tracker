@@ -63,7 +63,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Find Job Tracker tab and inject the job
             const allTabs = await chrome.tabs.query({})
             const trackerTab = allTabs.find(t =>
-                t.title?.includes('Job Tracker') ||
+                t.title?.toLowerCase().includes('job tracker') ||
+                t.title?.includes('neo.') ||
                 t.url?.includes('job-tracker') ||
                 t.url?.includes('localhost:5173')
             )
