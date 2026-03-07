@@ -465,10 +465,11 @@ export default function App() {
 
 function AddJobPanel({ onClose, onAdd, onBulkAdd }) {
   const [url, setUrl] = useState('')
+  const [title, setTitle] = useState('')
+  const [company, setCompany] = useState('')
+  const [location, setLocation] = useState('')
   const [status, setStatus] = useState('Applied')
   const [loading, setLoading] = useState(false)
-  const [preview, setPreview] = useState(null)
-  const [error, setError] = useState('')
   const [csvParsed, setCsvParsed] = useState([])
   const debounceRef = useRef(null)
   const inputRef = useRef(null)
@@ -478,27 +479,19 @@ function AddJobPanel({ onClose, onAdd, onBulkAdd }) {
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    setPreview(null)
-    setError('')
     if (!url.trim()) return
 
     debounceRef.current = setTimeout(async () => {
       setLoading(true)
       try {
         const data = await fetchJobData(url.trim())
-        setPreview(data)
+        if (data.title && data.title !== 'Unknown Position') setTitle(data.title)
+        if (data.company) setCompany(data.company)
+        if (data.location) setLocation(data.location)
       } catch {
-        setError('Could not fetch job info.')
         const domain = extractDomain(url.trim())
-        if (domain) {
-          setPreview({
-            title: 'Unknown Position',
-            company: domain.split('.')[0].charAt(0).toUpperCase() + domain.split('.')[0].slice(1),
-            location: '', domain,
-            logoUrl: getLogoUrl(domain),
-            fallbackLogoUrl: getFallbackLogoUrl(domain),
-            url: url.trim(),
-          })
+        if (domain && !company) {
+          setCompany(domain.split('.')[0].charAt(0).toUpperCase() + domain.split('.')[0].slice(1))
         }
       } finally { setLoading(false) }
     }, 900)
@@ -507,10 +500,17 @@ function AddJobPanel({ onClose, onAdd, onBulkAdd }) {
   }, [url])
 
   function handleAdd() {
-    if (!preview) return
+    if (!title.trim()) return
+    const domain = extractDomain(url.trim()) || company.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com'
     onAdd({
-      id: crypto.randomUUID(), ...preview,
-      fallbackLogoUrl: getFallbackLogoUrl(preview.domain),
+      id: crypto.randomUUID(),
+      title: title.trim(),
+      company: company.trim() || 'Unknown',
+      location: location.trim(),
+      domain,
+      logoUrl: getLogoUrl(domain),
+      fallbackLogoUrl: getFallbackLogoUrl(domain),
+      url: url.trim(),
       status, addedAt: Date.now(),
     })
     onClose()
@@ -532,22 +532,19 @@ function AddJobPanel({ onClose, onAdd, onBulkAdd }) {
 
   return (
     <>
-      <label className="modal-label">Job URL</label>
+      <label className="modal-label">Job URL <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span></label>
       <input ref={inputRef} className="modal-input" placeholder="Paste a job link..." value={url} onChange={e => setUrl(e.target.value)} />
 
       {loading && <div className="modal-loading"><div className="spinner" />Fetching...</div>}
 
-      {preview && !loading && (
-        <div className="modal-preview">
-          <div className="modal-preview-info">
-            <div className="modal-preview-title">{preview.title}</div>
-            <div className="modal-preview-company">{preview.company}</div>
-            {preview.location && <div className="modal-preview-location">{preview.location}</div>}
-          </div>
-        </div>
-      )}
+      <label className="modal-label">Job Title</label>
+      <input className="modal-input" placeholder="e.g. Software Engineer" value={title} onChange={e => setTitle(e.target.value)} />
 
-      {error && !preview && <div style={{ fontSize: '12px', color: 'rgba(255,100,100,0.8)', marginBottom: '12px' }}>{error}</div>}
+      <label className="modal-label">Company</label>
+      <input className="modal-input" placeholder="e.g. Google" value={company} onChange={e => setCompany(e.target.value)} />
+
+      <label className="modal-label">Location <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span></label>
+      <input className="modal-input" placeholder="e.g. New York, NY" value={location} onChange={e => setLocation(e.target.value)} />
 
       <label className="modal-label">Status</label>
       <select className="modal-select" value={status} onChange={e => setStatus(e.target.value)}>
@@ -580,7 +577,7 @@ function AddJobPanel({ onClose, onAdd, onBulkAdd }) {
           {csvParsed.length > 0 ? (
             <button className="btn-save" onClick={handleBulkImport}>Import {csvParsed.length} Jobs</button>
           ) : (
-            <button className="btn-save" onClick={handleAdd} disabled={!preview || loading}>Add Job</button>
+            <button className="btn-save" onClick={handleAdd} disabled={!title.trim() || loading}>Add Job</button>
           )}
         </div>
       </div>
