@@ -22,30 +22,74 @@ async function fetchJobData(url) {
   const domain = extractDomain(url)
   if (!domain) throw new Error('Invalid URL')
 
-  const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`
-  const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) })
-  const data = await res.json()
-  const html = data.contents || ''
+  let title = '', company = '', location = ''
 
-  const parser = new DOMParser()
-  const doc = parser.parseFromString(html, 'text/html')
+  // Greenhouse: direct public API
+  const ghMatch = url.match(/greenhouse\.io\/([^/]+)\/jobs\/(\d+)/)
+  if (ghMatch) {
+    try {
+      const res = await fetch(`https://boards-api.greenhouse.io/v1/boards/${ghMatch[1]}/jobs/${ghMatch[2]}`, { signal: AbortSignal.timeout(8000) })
+      const data = await res.json()
+      title = data.title || ''
+      company = ghMatch[1].charAt(0).toUpperCase() + ghMatch[1].slice(1)
+      location = data.location?.name || ''
+      if (title) return { title, company, location, domain, logoUrl: getLogoUrl(domain), fallbackLogoUrl: getFallbackLogoUrl(domain), url }
+    } catch { }
+  }
 
-  const meta = (name) =>
-    doc.querySelector(`meta[property="${name}"]`)?.content ||
-    doc.querySelector(`meta[name="${name}"]`)?.content ||
-    ''
+  // Lever: direct public API
+  const leverMatch = url.match(/jobs\.lever\.co\/([^/]+)\/([a-f0-9-]+)/)
+  if (leverMatch) {
+    try {
+      const res = await fetch(`https://api.lever.co/v0/postings/${leverMatch[1]}/${leverMatch[2]}`, { signal: AbortSignal.timeout(8000) })
+      const data = await res.json()
+      title = data.text || ''
+      company = data.categories?.team || leverMatch[1].charAt(0).toUpperCase() + leverMatch[1].slice(1)
+      location = data.categories?.location || ''
+      if (title) return { title, company, location, domain, logoUrl: getLogoUrl(domain), fallbackLogoUrl: getFallbackLogoUrl(domain), url }
+    } catch { }
+  }
 
-  let title = meta('og:title') || meta('title') || doc.title || ''
-  let company = meta('og:site_name') || ''
-  let location = ''
+  // Fallback: try CORS proxies for HTML scraping
+  const proxies = [
+    (u) => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
+    (u) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+  ]
 
-  if (domain.includes('linkedin.com')) {
-    const titleEl = doc.querySelector('h1.top-card-layout__title, .job-details-jobs-unified-top-card__job-title, h1')
-    if (titleEl) title = titleEl.textContent.trim()
-    const companyEl = doc.querySelector('.topcard__org-name-link, .job-details-jobs-unified-top-card__company-name a, .top-card-layout__first-subline a')
-    if (companyEl) company = companyEl.textContent.trim()
-    const locationEl = doc.querySelector('.topcard__flavor--bullet, .job-details-jobs-unified-top-card__bullet, .top-card-layout__first-subline .topcard__flavor')
-    if (locationEl) location = locationEl.textContent.trim()
+  let html = ''
+  for (const proxy of proxies) {
+    try {
+      const res = await fetch(proxy(url), { signal: AbortSignal.timeout(8000) })
+      if (proxy === proxies[0]) {
+        const data = await res.json()
+        html = data.contents || ''
+      } else {
+        html = await res.text()
+      }
+      if (html.length > 200) break
+    } catch { continue }
+  }
+
+  if (html) {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(html, 'text/html')
+
+    const meta = (name) =>
+      doc.querySelector(`meta[property="${name}"]`)?.content ||
+      doc.querySelector(`meta[name="${name}"]`)?.content || ''
+
+    title = meta('og:title') || meta('title') || doc.title || ''
+    company = meta('og:site_name') || ''
+    location = ''
+
+    if (domain.includes('linkedin.com')) {
+      const titleEl = doc.querySelector('h1.top-card-layout__title, .job-details-jobs-unified-top-card__job-title, h1')
+      if (titleEl) title = titleEl.textContent.trim()
+      const companyEl = doc.querySelector('.topcard__org-name-link, .job-details-jobs-unified-top-card__company-name a, .top-card-layout__first-subline a')
+      if (companyEl) company = companyEl.textContent.trim()
+      const locationEl = doc.querySelector('.topcard__flavor--bullet, .job-details-jobs-unified-top-card__bullet, .top-card-layout__first-subline .topcard__flavor')
+      if (locationEl) location = locationEl.textContent.trim()
+    }
   }
 
   if (title && company && title.endsWith(company)) {
@@ -166,6 +210,15 @@ export default function App() {
   useEffect(() => { localStorage.setItem('jt-jobs', JSON.stringify(jobs)) }, [jobs])
   useEffect(() => { localStorage.setItem('jt-notes', JSON.stringify(notes)) }, [notes])
   useEffect(() => { localStorage.setItem('jt-images', JSON.stringify(images)) }, [images])
+
+  // Listen for jobs added by the Chrome extension
+  useEffect(() => {
+    const handler = () => {
+      try { setJobs(JSON.parse(localStorage.getItem('jt-jobs') || '[]')) } catch { }
+    }
+    window.addEventListener('jt-update', handler)
+    return () => window.removeEventListener('jt-update', handler)
+  }, [])
 
   useEffect(() => {
     if (openMenu === null) return
