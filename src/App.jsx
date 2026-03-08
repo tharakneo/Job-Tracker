@@ -346,7 +346,7 @@ export default function App() {
     <div className="app">
       {/* Left sidebar */}
       <div className="sidebar">
-        <span className="brand"><span className="brand-neo">neo.</span><br /><span className="brand-jt">job tracker</span></span>
+        <span className="brand"><span className="brand-jt">job tracker</span></span>
         <nav className="sidebar-nav">
           {STATUSES.map(s => (
             <button
