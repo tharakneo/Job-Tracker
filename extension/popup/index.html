@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AutoFill Pro</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+    <div id="app">
+        <!-- Login View -->
+        <div id="auth-view" class="view hidden">
+            <div class="logo">
+                <div class="logo-icon">⚡</div>
+                <h1>AutoFill Pro</h1>
+                <p class="tagline">AI-powered job application filler</p>
+            </div>
+
+            <div id="auth-error" class="error-banner hidden"></div>
+
+            <div class="tabs">
+                <button class="tab active" data-tab="login">Login</button>
+                <button class="tab" data-tab="register">Register</button>
+            </div>
+
+            <form id="auth-form">
+                <div class="form-group">
+                    <label for="auth-email">Email</label>
+                    <input id="auth-email" type="email" placeholder="you@email.com" required />
+                </div>
+                <div class="form-group">
+                    <label for="auth-password">Password</label>
+                    <input id="auth-password" type="password" placeholder="••••••••" required />
+                </div>
+                <button type="submit" class="btn-primary" id="auth-submit">Login</button>
+            </form>
+        </div>
+
+        <!-- Main View (authenticated) -->
+        <div id="main-view" class="view hidden">
+            <div class="header">
+                <div class="header-left">
+                    <span class="logo-icon-sm">⚡</span>
+                    <span class="app-name">AutoFill Pro</span>
+                </div>
+                <div class="header-right">
+                    <span id="status-dot" class="dot dot-green"></span>
+                    <button id="logout-btn" class="btn-ghost">Logout</button>
+                </div>
+            </div>
+
+            <div id="main-error" class="error-banner hidden"></div>
+
+            <!-- Fill Control -->
+            <div class="section fill-section">
+                <button id="fill-btn" class="btn-primary btn-full">
+                    <span>⚡ Auto-Fill This Page</span>
+                </button>
+                <p class="hint">Review highlighted fields before submitting</p>
+            </div>
+
+            <!-- Nav tabs -->
+            <div class="tabs">
+                <button class="tab active" data-tab="profile">Profile</button>
+                <button class="tab" data-tab="eeo">EEO / Legal</button>
+                <button class="tab" data-tab="settings">Settings</button>
+            </div>
+
+            <!-- Profile Tab -->
+            <div id="tab-profile" class="tab-content active">
+                <form id="profile-form" class="profile-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>First Name</label>
+                            <input type="text" name="first_name" placeholder="Jane" />
+                        </div>
+                        <div class="form-group">
+                            <label>Last Name</label>
+                            <input type="text" name="last_name" placeholder="Doe" />
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" name="email" placeholder="jane@email.com" />
+                    </div>
+                    <div class="form-group">
+                        <label>Phone</label>
+                        <input type="tel" name="phone" placeholder="+1 555 000 0000" />
+                    </div>
+                    <div class="form-group">
+                        <label>LinkedIn URL</label>
+                        <input type="url" name="linkedin_url" placeholder="linkedin.com/in/..." />
+                    </div>
+                    <div class="form-group">
+                        <label>GitHub URL</label>
+                        <input type="url" name="github_url" placeholder="github.com/..." />
+                    </div>
+                    <div class="form-group">
+                        <label>Portfolio / Website</label>
+                        <input type="url" name="portfolio_url" placeholder="yoursite.com" />
+                    </div>
+                    <div class="form-group">
+                        <label>City</label>
+                        <input type="text" name="city" placeholder="San Francisco" />
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>State</label>
+                            <input type="text" name="state" placeholder="CA" />
+                        </div>
+                        <div class="form-group">
+                            <label>ZIP</label>
+                            <input type="text" name="zip_code" placeholder="94102" />
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Country</label>
+                        <input type="text" name="country" placeholder="United States" />
+                    </div>
+                    <button type="submit" class="btn-primary btn-full">Save Profile</button>
+                    <p id="profile-saved" class="save-msg hidden">✓ Saved!</p>
+                </form>
+            </div>
+
+            <!-- EEO / Legal Tab -->
+            <div id="tab-eeo" class="tab-content hidden">
+                <form id="eeo-form" class="profile-form">
+                    <div class="form-group">
+                        <label>Authorized to Work in USA?</label>
+                        <select name="authorized_to_work">
+                            <option value="">-- Select --</option>
+                            <option value="true">Yes</option>
+                            <option value="false">No</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Require Sponsorship?</label>
+                        <select name="sponsorship_needed">
+                            <option value="">-- Select --</option>
+                            <option value="true">Yes</option>
+                            <option value="false">No</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Visa / Work Status</label>
+                        <input type="text" name="visa_status" placeholder="e.g. US Citizen, H1B, OPT" />
+                    </div>
+                    <div class="form-group">
+                        <label>Gender</label>
+                        <select name="gender">
+                            <option value="">-- Select --</option>
+                            <option>Male</option>
+                            <option>Female</option>
+                            <option>Non-binary</option>
+                            <option>Decline to Self Identify</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Ethnicity</label>
+                        <select name="ethnicity">
+                            <option value="">-- Select --</option>
+                            <option>Hispanic or Latino</option>
+                            <option>White</option>
+                            <option>Black or African American</option>
+                            <option>Asian</option>
+                            <option>Two or More Races</option>
+                            <option>Decline to Self Identify</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Veteran Status</label>
+                        <select name="veteran_status">
+                            <option value="">-- Select --</option>
+                            <option>Yes</option>
+                            <option>No</option>
+                            <option>Decline to Self Identify</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Disability Status</label>
+                        <select name="disability_status">
+                            <option value="">-- Select --</option>
+                            <option>Yes</option>
+                            <option>No</option>
+                            <option>Decline to Self Identify</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn-primary btn-full">Save EEO Info</button>
+                    <p id="eeo-saved" class="save-msg hidden">✓ Saved!</p>
+                </form>
+            </div>
+
+            <!-- Settings Tab -->
+            <div id="tab-settings" class="tab-content hidden">
+                <form id="settings-form" class="profile-form">
+                    <div class="form-group">
+                        <label>Grok API Key</label>
+                        <input type="password" name="grok_api_key" placeholder="xai-..." />
+                        <p class="field-hint">Optional. Uses our shared key by default.</p>
+                    </div>
+                    <div class="form-group">
+                        <label>Resume Text (paste your resume)</label>
+                        <textarea name="resume_text" rows="8"
+                            placeholder="Paste your resume text here — used by AI to craft custom answers..."></textarea>
+                    </div>
+                    <button type="submit" class="btn-primary btn-full">Save Settings</button>
+                    <p id="settings-saved" class="save-msg hidden">✓ Saved!</p>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+
+</html>
