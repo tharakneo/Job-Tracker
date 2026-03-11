@@ -1,12 +1,13 @@
 {
     "manifest_version": 3,
-    "name": "AutoFill Pro",
+    "name": "Job Tracker",
     "version": "1.0.0",
     "description": "AI-powered job application autofiller. Supports Workday, Greenhouse, Lever, and more.",
     "permissions": [
         "storage",
         "activeTab",
-        "scripting"
+        "scripting",
+        "identity"
     ],
     "host_permissions": [
         "https://*.myworkdayjobs.com/*",

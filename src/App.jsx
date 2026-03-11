@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { supabase } from './supabase'
 
 
 function getLogoUrl(domain) {
@@ -118,9 +119,11 @@ async function fetchJobData(url) {
 
 const STATUSES = ['Saved', 'In Progress', 'Applied', 'Interview', 'Rejected']
 
-function timeAgo(ts, status) {
+function timeAgo(dateString, status) {
   const label = status || 'Saved'
-  const diff = Date.now() - ts
+  const date = new Date(dateString)
+  if (isNaN(date.getTime())) return `${label} sometime ago`
+  const diff = Date.now() - date.getTime()
   const mins = Math.floor(diff / 60000)
   if (mins < 1) return `${label} just now`
   if (mins < 60) return `${label} ${mins}m ago`
@@ -187,9 +190,7 @@ function parseCSV(text) {
 }
 
 export default function App() {
-  const [jobs, setJobs] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('jt-jobs') || '[]') } catch { return [] }
-  })
+  const [jobs, setJobs] = useState([])
   const [activeStatus, setActiveStatus] = useState('Applied')
   const [search, setSearch] = useState('')
   const [showModal, setShowModal] = useState(false)
@@ -207,18 +208,38 @@ export default function App() {
     try { return JSON.parse(localStorage.getItem('jt-images') || '[]') } catch { return [] }
   })
 
-  useEffect(() => { localStorage.setItem('jt-jobs', JSON.stringify(jobs)) }, [jobs])
   useEffect(() => { localStorage.setItem('jt-notes', JSON.stringify(notes)) }, [notes])
   useEffect(() => { localStorage.setItem('jt-images', JSON.stringify(images)) }, [images])
 
-  // Listen for jobs added by the Chrome extension
+  // Fetch jobs from Supabase on mount
   useEffect(() => {
-    const handler = () => {
-      try { setJobs(JSON.parse(localStorage.getItem('jt-jobs') || '[]')) } catch { }
+    async function fetchJobs() {
+      const { data, error } = await supabase
+        .from('jobs')
+        .select('*')
+        .order('added_at', { ascending: false })
+      if (!error && data) {
+        // Map snake_case DB columns to camelCase for the frontend
+        const mappedJobs = data.map(j => ({
+          id: j.id,
+          title: j.title,
+          company: j.company,
+          location: j.location,
+          url: j.url,
+          domain: j.domain,
+          logoUrl: j.logo_url,
+          fallbackLogoUrl: j.fallback_logo_url,
+          status: j.status,
+          addedAt: j.added_at
+        }))
+        setJobs(mappedJobs)
+      }
     }
-    window.addEventListener('jt-update', handler)
-    return () => window.removeEventListener('jt-update', handler)
+    fetchJobs()
   }, [])
+
+  // Currently we won't listen to the extension via localStorage jt-update anymore.
+  // We can implement Supabase Realtime later if needed.
 
   useEffect(() => {
     if (openMenu === null) return
@@ -232,7 +253,7 @@ export default function App() {
   useEffect(() => {
     if (!showModal) return
     const handler = (e) => {
-      if (e.target.closest('.side-panel') || e.target.closest('.btn-add')) return
+      if (e.target.closest('.side-panel') || e.target.closest('.btn-add-wrap')) return
       setShowModal(false)
     }
     document.addEventListener('mousedown', handler)
@@ -251,12 +272,17 @@ export default function App() {
     return j.title.toLowerCase().includes(q) || j.company.toLowerCase().includes(q) || j.location?.toLowerCase().includes(q)
   })
 
-  function deleteJob(id) { setJobs(prev => prev.filter(j => j.id !== id)); setOpenMenu(null) }
+  async function deleteJob(id) {
+    setJobs(prev => prev.filter(j => j.id !== id))
+    setOpenMenu(null)
+    await supabase.from('jobs').delete().eq('id', id)
+  }
 
-  function moveJob(id, newStatus) {
+  async function moveJob(id, newStatus) {
     setJobs(prev => prev.map(j => j.id === id ? { ...j, status: newStatus } : j))
     setOpenMenu(null)
     showToastMsg(`Moved to ${newStatus}`)
+    await supabase.from('jobs').update({ status: newStatus }).eq('id', id)
   }
 
   function copyLink(job) {
@@ -280,21 +306,65 @@ export default function App() {
     }
   }
 
-  function bulkDeleteSelected() {
+  async function bulkDeleteSelected() {
+    const idsToDelete = Array.from(selectedJobs)
     setJobs(prev => prev.filter(j => !selectedJobs.has(j.id)))
     setSelectedJobs(new Set())
-    showToastMsg(`Removed ${selectedJobs.size} jobs`)
+    showToastMsg(`Removed ${idsToDelete.length} jobs`)
+    await supabase.from('jobs').delete().in('id', idsToDelete)
   }
 
-  function bulkMoveSelected(newStatus) {
+  async function bulkMoveSelected(newStatus) {
+    const idsToMove = Array.from(selectedJobs)
     setJobs(prev => prev.map(j => selectedJobs.has(j.id) ? { ...j, status: newStatus } : j))
     setSelectedJobs(new Set())
-    showToastMsg(`Moved ${selectedJobs.size} jobs to ${newStatus}`)
+    showToastMsg(`Moved ${idsToMove.length} jobs to ${newStatus}`)
+    await supabase.from('jobs').update({ status: newStatus }).in('id', idsToMove)
   }
 
-  function addJob(job) { setJobs(prev => [job, ...prev]); showToastMsg(`Added "${job.title}"`) }
+  async function addJob(job) {
+    // Generate UUID if not provided by crypto (though crypto should work)
+    const newId = crypto.randomUUID()
+    const jobToInsert = { ...job, id: newId }
+    
+    // Optimistic UI update
+    setJobs(prev => [jobToInsert, ...prev])
+    showToastMsg(`Added "${job.title}"`)
 
-  function bulkAdd(newJobs) { setJobs(prev => [...newJobs, ...prev]); showToastMsg(`Imported ${newJobs.length} jobs`) }
+    // Save to Supabase
+    await supabase.from('jobs').insert([{
+      id: newId,
+      title: job.title,
+      company: job.company,
+      location: job.location,
+      url: job.url,
+      domain: job.domain,
+      logo_url: job.logoUrl,
+      fallback_logo_url: job.fallbackLogoUrl,
+      status: job.status
+    }])
+  }
+
+  async function bulkAdd(newJobs) {
+    // Optimistic UI update
+    setJobs(prev => [...newJobs, ...prev])
+    showToastMsg(`Imported ${newJobs.length} jobs`)
+
+    // Map to snake_case for Supabase
+    const supabaseJobs = newJobs.map(j => ({
+      id: j.id,
+      title: j.title,
+      company: j.company,
+      location: j.location,
+      url: j.url,
+      domain: j.domain,
+      logo_url: j.logoUrl,
+      fallback_logo_url: j.fallbackLogoUrl,
+      status: j.status
+    }))
+
+    await supabase.from('jobs').insert(supabaseJobs)
+  }
 
   function showToastMsg(msg) { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
@@ -302,7 +372,7 @@ export default function App() {
   useEffect(() => {
     if (!showFab) return
     const handler = (e) => {
-      if (e.target.closest('.fab-wrap')) return
+      if (e.target.closest('.btn-add-wrap')) return
       setShowFab(false)
     }
     document.addEventListener('mousedown', handler)
@@ -344,9 +414,11 @@ export default function App() {
 
   return (
     <div className="app">
+      {/* Absolute Logo */}
+      <span className="brand absolute-brand"><span className="brand-jt">job tracker</span></span>
+
       {/* Left sidebar */}
       <div className="sidebar">
-        <span className="brand"><span className="brand-jt">job tracker</span></span>
         <nav className="sidebar-nav">
           {STATUSES.map(s => (
             <button
@@ -399,10 +471,17 @@ export default function App() {
                     onChange={e => setSearch(e.target.value)}
                   />
                 </div>
-                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <button className="btn-add" onClick={() => setShowModal(!showModal)}>
-                    <PlusIcon /> Add Job
+                <div className="btn-add-wrap" style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button className="btn-add" onClick={() => { setShowFab(!showFab); setShowModal(false); }}>
+                    <PlusIcon /> Add
                   </button>
+                  {showFab && (
+                    <div className="fab-dropdown" onClick={e => e.stopPropagation()} style={{ top: 'calc(100% + 8px)', right: 0 }}>
+                      <button onClick={() => { setShowModal(true); setShowFab(false); }}>Job</button>
+                      <button onClick={addNote}>Note</button>
+                      <button onClick={addImage}>Image</button>
+                    </div>
+                  )}
                   {showModal && (
                     <div className="side-panel" onClick={e => e.stopPropagation()}>
                       <AddJobPanel
@@ -445,7 +524,7 @@ export default function App() {
                     )}
                     <div className="job-company">{job.company}</div>
                     {job.location && <div className="job-location">{job.location}</div>}
-                    <div className="job-posted">{timeAgo(job.addedAt, job.status)}</div>
+                    <div className="job-posted">{timeAgo((job.addedAt || new Date()).toString(), job.status)}</div>
                   </div>
                   <div className="job-right" style={{ position: 'relative' }}>
                     <button
@@ -499,19 +578,6 @@ export default function App() {
       ))}
 
 
-      <div className="fab-wrap">
-        <button className="fab-btn" onClick={() => setShowFab(!showFab)}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </button>
-        {showFab && (
-          <div className="fab-dropdown">
-            <button onClick={addNote}>Note</button>
-            <button onClick={addImage}>Image</button>
-          </div>
-        )}
-      </div>
     </div>
   )
 }

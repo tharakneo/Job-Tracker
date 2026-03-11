@@ -115,6 +115,18 @@ $("auth-form")?.addEventListener("submit", async (e) => {
     }
 });
 
+$("google-login-btn")?.addEventListener("click", async () => {
+    hideError("auth-error");
+    try {
+        await sendMsg({ type: "GOOGLE_LOGIN" });
+        $("auth-view").classList.add("hidden");
+        $("main-view").classList.remove("hidden");
+        await loadProfile();
+    } catch (err) {
+        showError("auth-error", err.message);
+    }
+});
+
 $("logout-btn")?.addEventListener("click", async () => {
     await sendMsg({ type: "LOGOUT" });
     $("main-view").classList.add("hidden");
