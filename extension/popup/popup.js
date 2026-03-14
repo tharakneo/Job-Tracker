@@ -1,43 +1,4 @@
-// popup.js — Controls all popup UI interactions
-
 const $ = (id) => document.getElementById(id);
-
-// ── Tab switching ─────────────────────────────────────────────────────────────
-
-document.querySelectorAll(".tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-        const targetTab = tab.dataset.tab;
-        const parentView = tab.closest(".view");
-
-        parentView.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
-        tab.classList.add("active");
-
-        // content divs are id="tab-{name}"
-        parentView.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
-        const content = parentView.querySelector(`#tab-${targetTab}`);
-        if (content) content.classList.add("active");
-    });
-});
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function showError(elId, msg) {
-    const el = $(elId);
-    if (!el) return;
-    el.textContent = msg;
-    el.classList.remove("hidden");
-}
-
-function hideError(elId) {
-    $(elId)?.classList.add("hidden");
-}
-
-function showSaved(elId) {
-    const el = $(elId);
-    if (!el) return;
-    el.classList.remove("hidden");
-    setTimeout(() => el.classList.add("hidden"), 2000);
-}
 
 function sendMsg(msg) {
     return new Promise((resolve, reject) => {
@@ -49,156 +10,244 @@ function sendMsg(msg) {
     });
 }
 
-function getFormData(form) {
-    const data = {};
-    new FormData(form).forEach((val, key) => {
-        // Cast booleans stored as strings
-        if (val === "true") data[key] = true;
-        else if (val === "false") data[key] = false;
-        else if (val !== "") data[key] = val;
+function showView(id) {
+    ["auth-view", "main-view", "add-job-view"].forEach((v) => {
+        $(v).classList.toggle("hidden", v !== id);
     });
-    return data;
 }
 
-function populateForm(form, profile) {
-    for (const [key, value] of Object.entries(profile)) {
-        const el = form.querySelector(`[name="${key}"]`);
-        if (!el || value === null || value === undefined) continue;
-        if (el.tagName === "SELECT") {
-            // Boolean profile values stored as true/false, select has "true"/"false" option values
-            el.value = String(value);
-        } else {
-            el.value = String(value);
-        }
-    }
-}
-
-// ── Init ──────────────────────────────────────────────────────────────────────
+// ── Init ─────────────────────────────────────────────────────────────────────
 
 async function init() {
-    const { token } = await sendMsg({ type: "GET_TOKEN" });
-
-    if (!token) {
-        $("auth-view").classList.remove("hidden");
-    } else {
-        $("main-view").classList.remove("hidden");
-        await loadProfile();
+    try {
+        const { token } = await sendMsg({ type: "GET_TOKEN" });
+        showView(token ? "main-view" : "auth-view");
+    } catch {
+        showView("auth-view");
     }
 }
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
+// ── Auth ─────────────────────────────────────────────────────────────────────
 
-// Toggle between login and register labels
-const authTabs = document.querySelectorAll("#auth-view .tab");
-let authMode = "login";
-authTabs.forEach((tab) => {
-    tab.addEventListener("click", () => {
-        authMode = tab.dataset.tab;
-        $("auth-submit").textContent = authMode === "login" ? "Login" : "Create Account";
-        hideError("auth-error");
-    });
-});
-
-$("auth-form")?.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    hideError("auth-error");
-    const email = $("auth-email").value;
-    const password = $("auth-password").value;
-
-    try {
-        await sendMsg({ type: authMode === "login" ? "LOGIN" : "REGISTER", email, password });
-        $("auth-view").classList.add("hidden");
-        $("main-view").classList.remove("hidden");
-        await loadProfile();
-    } catch (err) {
-        showError("auth-error", err.message);
-    }
-});
-
-$("google-login-btn")?.addEventListener("click", async () => {
-    hideError("auth-error");
+$("google-login-btn").addEventListener("click", async () => {
+    $("auth-error").classList.add("hidden");
+    $("google-login-btn").textContent = "Signing in...";
+    $("google-login-btn").disabled = true;
     try {
         await sendMsg({ type: "GOOGLE_LOGIN" });
-        $("auth-view").classList.add("hidden");
-        $("main-view").classList.remove("hidden");
-        await loadProfile();
+        showView("main-view");
     } catch (err) {
-        showError("auth-error", err.message);
+        $("auth-error").textContent = err.message;
+        $("auth-error").classList.remove("hidden");
+    } finally {
+        $("google-login-btn").textContent = "Continue with Google";
+        $("google-login-btn").disabled = false;
     }
 });
 
-$("logout-btn")?.addEventListener("click", async () => {
+$("logout-btn").addEventListener("click", async () => {
     await sendMsg({ type: "LOGOUT" });
-    $("main-view").classList.add("hidden");
-    $("auth-view").classList.remove("hidden");
+    showView("auth-view");
 });
 
-// ── Profile loading ───────────────────────────────────────────────────────────
+// ── Job extraction (runs inside the target page via scripting API) ───────────
 
-async function loadProfile() {
-    try {
-        const profile = await sendMsg({ type: "GET_PROFILE" });
-        populateForm($("profile-form"), profile);
-        populateForm($("eeo-form"), profile);
-        populateForm($("settings-form"), profile);
-    } catch (err) {
-        showError("main-error", "Could not load profile. Is the backend running?");
+function extractJobFromPage() {
+    function findLabelValue(labelText) {
+        const lower = labelText.toLowerCase();
+        // dt/th → next sibling
+        for (const el of document.querySelectorAll("dt, th")) {
+            if (el.textContent.trim().toLowerCase() === lower) {
+                const sib = el.nextElementSibling;
+                if (sib) return sib.textContent.trim();
+            }
+        }
+        // Walk leaf elements looking for exact label text
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+        while (walker.nextNode()) {
+            const el = walker.currentNode;
+            if (el.children.length > 2) continue;
+            if (el.textContent.trim().toLowerCase() === lower) {
+                const next = el.nextElementSibling;
+                if (next && next.textContent.trim().length > 0) return next.textContent.trim();
+                const parentNext = el.parentElement?.nextElementSibling;
+                if (parentNext && parentNext.textContent.trim().length > 0)
+                    return parentNext.textContent.trim();
+            }
+        }
+        return "";
     }
+
+    // 1. JSON-LD structured data
+    for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+        try {
+            const raw = JSON.parse(script.textContent);
+            const items = Array.isArray(raw) ? raw : [raw];
+            const job = items.find((d) => d["@type"] === "JobPosting");
+            if (job) {
+                const loc = job.jobLocation;
+                const city = loc?.address?.addressLocality || "";
+                const region = loc?.address?.addressRegion || "";
+                const location =
+                    typeof loc === "string" ? loc : [city, region].filter(Boolean).join(", ");
+                return {
+                    title: (job.title || "").trim(),
+                    company: (job.hiringOrganization?.name || "").trim(),
+                    location: location.trim() || findLabelValue("location"),
+                };
+            }
+        } catch {}
+    }
+
+    // 2. Find best h1 — skip nav/header elements and nav-like text
+    function getBestH1() {
+        for (const h1 of document.querySelectorAll("h1")) {
+            if (h1.closest("nav, header")) continue;
+            const text = h1.textContent.trim().replace(/\s+/g, " ");
+            if (!text || text.length < 4 || text.length > 200) continue;
+            if (/skip\s+to|main\s+content|navigation|homepage/i.test(text)) continue;
+            return text;
+        }
+        return "";
+    }
+
+    function isTagline(text) {
+        // Taglines look like sentences — contain verbs/prepositions or are long
+        return /\b(your|our|we|for|by|with|at\s+\w|the|build|join|find|explore|discover|get|make|create|career)\b/i.test(text)
+            || text.split(" ").length > 4;
+    }
+
+    const og = (p) => document.querySelector(`meta[property="${p}"]`)?.content?.trim() || "";
+    const meta = (n) => document.querySelector(`meta[name="${n}"]`)?.content?.trim() || "";
+
+    // Title: h1 from content area > og:title > document.title
+    const h1Text = getBestH1();
+    let title = h1Text || og("og:title") || meta("title") || document.title || "";
+
+    // Company: og:site_name only if it's a clean short name, not a tagline
+    const siteName = og("og:site_name");
+    let company = (siteName && !isTagline(siteName)) ? siteName : "";
+
+    // 3. Visible "Location" label on page
+    let location = findLabelValue("Location") || findLabelValue("location");
+
+    // 4. Parse "Title at Company" pattern from title
+    if (!company && title) {
+        const m = title.match(/^(.+?)\s+at\s+([\w\s&.,'-]+?)(?:\s*[|–—-]|$)/i);
+        if (m) {
+            title = m[1].trim();
+            company = m[2].trim();
+        }
+    }
+
+    // Strip trailing " | Site" or " - Site" suffixes from title
+    title = title.replace(/\s*[|–—]\s*.+$/, "").replace(/\s+-\s+[A-Z].+$/, "").trim();
+
+    return { title, company, location };
 }
 
-// ── Profile save ──────────────────────────────────────────────────────────────
+// ── Add Job flow ─────────────────────────────────────────────────────────────
 
-$("profile-form")?.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    hideError("main-error");
+$("add-job-btn").addEventListener("click", async () => {
+    showView("add-job-view");
+    $("parse-loading").classList.remove("hidden");
+    $("add-job-form").classList.add("hidden");
+    $("add-job-error").classList.add("hidden");
+
+    let job = { title: "", company: "", location: "" };
+
     try {
-        await sendMsg({ type: "UPDATE_PROFILE", data: getFormData($("profile-form")) });
-        showSaved("profile-saved");
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+        // Extract job data directly from the page DOM
+        const [injection] = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: extractJobFromPage,
+        });
+
+        if (injection?.result) {
+            job = injection.result;
+        }
+
+        // If no company found, use the domain name
+        if (!job.company && tab.url) {
+            try {
+                const hostname = new URL(tab.url).hostname.replace("www.", "");
+                job.company = hostname.split(".")[0].replace(/^\w/, (c) => c.toUpperCase());
+            } catch {}
+        }
     } catch (err) {
-        showError("main-error", err.message);
+        console.warn("[Job Tracker] Could not extract from page:", err.message);
     }
+
+    $("job-title").value = job.title || "";
+    $("job-company").value = job.company || "";
+    $("job-location").value = job.location || "";
+    $("job-status").value = "Applied";
+
+    $("parse-loading").classList.add("hidden");
+    $("add-job-form").classList.remove("hidden");
+    $("job-title").focus();
 });
 
-$("eeo-form")?.addEventListener("submit", async (e) => {
+$("back-btn").addEventListener("click", () => showView("main-view"));
+
+$("add-job-form").addEventListener("submit", async (e) => {
     e.preventDefault();
-    hideError("main-error");
-    try {
-        await sendMsg({ type: "UPDATE_PROFILE", data: getFormData($("eeo-form")) });
-        showSaved("eeo-saved");
-    } catch (err) {
-        showError("main-error", err.message);
+    $("add-job-error").classList.add("hidden");
+
+    const title = $("job-title").value.trim();
+    if (!title) {
+        $("add-job-error").textContent = "Job title is required";
+        $("add-job-error").classList.remove("hidden");
+        return;
     }
-});
 
-$("settings-form")?.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    hideError("main-error");
-    try {
-        await sendMsg({ type: "UPDATE_PROFILE", data: getFormData($("settings-form")) });
-        showSaved("settings-saved");
-    } catch (err) {
-        showError("main-error", err.message);
-    }
-});
-
-// ── Fill button ───────────────────────────────────────────────────────────────
-
-$("fill-btn")?.addEventListener("click", async () => {
-    const btn = $("fill-btn");
-    btn.textContent = "Filling…";
+    const btn = $("save-job-btn");
+    btn.textContent = "Saving...";
     btn.disabled = true;
 
     try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        await chrome.tabs.sendMessage(tab.id, { type: "TRIGGER_FILL" });
-        btn.textContent = "✓ Done! Review green fields";
-        btn.style.background = "linear-gradient(135deg, #16a34a, #15803d)";
-    } catch {
-        btn.textContent = "⚡ Auto-Fill This Page";
+        await sendMsg({
+            type: "ADD_JOB",
+            data: {
+                title,
+                company: $("job-company").value.trim(),
+                location: $("job-location").value.trim(),
+                status: $("job-status").value,
+                url: tab.url,
+            },
+        });
+        btn.textContent = "Saved";
+        btn.style.color = "#5b9df5";
+        setTimeout(() => showView("main-view"), 800);
+    } catch (err) {
+        $("add-job-error").textContent = err.message;
+        $("add-job-error").classList.remove("hidden");
+        btn.textContent = "Save to Tracker";
         btn.disabled = false;
     }
 });
 
-// ── Boot ──────────────────────────────────────────────────────────────────────
+// ── Autofill ─────────────────────────────────────────────────────────────────
+
+$("fill-btn").addEventListener("click", async () => {
+    const btn = $("fill-btn");
+    btn.textContent = "Filling...";
+    btn.disabled = true;
+    try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        await chrome.tabs.sendMessage(tab.id, { type: "TRIGGER_FILL" });
+        btn.textContent = "Done — review fields";
+        setTimeout(() => {
+            btn.textContent = "Autofill";
+            btn.disabled = false;
+        }, 2500);
+    } catch {
+        btn.textContent = "Autofill";
+        btn.disabled = false;
+    }
+});
 
 init();

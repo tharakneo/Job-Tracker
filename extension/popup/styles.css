@@ -1,335 +1,224 @@
-/* ── Reset & Base ─────────────────────────────────────────────────────────── */
-*,
-*::before,
-*::after {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     background: #0a0a0a;
     color: #e8e8e8;
-    width: 360px;
-    min-height: 480px;
+    width: 280px;
     font-size: 13px;
     -webkit-font-smoothing: antialiased;
 }
 
-#app {
-    padding: 16px;
-}
+#app { padding: 16px; }
 
-/* ── Views ────────────────────────────────────────────────────────────────── */
-.view {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-}
+.view { display: flex; flex-direction: column; gap: 12px; }
+.hidden { display: none !important; }
 
-.hidden {
-    display: none !important;
-}
-
-/* ── Logo / Auth Header ───────────────────────────────────────────────────── */
-.logo {
-    text-align: center;
-    padding: 24px 0 12px;
-}
+/* Auth */
+.logo { text-align: center; padding: 28px 0 16px; }
 
 .brand {
-    font-size: 20px;
+    font-size: 16px;
     font-weight: 600;
-    letter-spacing: 0.02em;
-    color: #e8e8ed;
-    user-select: none;
-    line-height: 1.3;
-}
-
-.brand-jt {
     color: #ffffff;
-    font-weight: 500;
+    letter-spacing: 0.01em;
+    user-select: none;
 }
 
 .tagline {
     font-size: 12px;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255,255,255,0.35);
     margin-top: 4px;
-    font-weight: 400;
 }
 
-/* ── Header (main view) ───────────────────────────────────────────────────── */
+/* Header */
 .header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding-bottom: 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
 }
 
-.header-left {
-    display: flex;
-    align-items: center;
-}
-
-.app-name.brand {
-    font-size: 15px;
-}
-
-.header-right {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-}
-
-.dot-green {
-    background: #8bc58b;
-    box-shadow: 0 0 6px #8bc58b;
-}
-
-/* ── Fill section ─────────────────────────────────────────────────────────── */
-.fill-section {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-top: 4px;
-}
-
-.hint {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.3);
-    text-align: center;
-}
-
-/* ── Tabs ─────────────────────────────────────────────────────────────────── */
-.tabs {
-    display: flex;
-    gap: 4px;
-    background: rgba(255, 255, 255, 0.04);
-    border-radius: 8px;
-    padding: 4px;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.tab {
-    flex: 1;
-    padding: 6px 8px;
-    border-radius: 6px;
-    border: none;
-    background: transparent;
-    color: rgba(255, 255, 255, 0.5);
-    font-family: inherit;
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.15s;
-}
-
-.tab:hover {
-    color: #ffffff;
-    background: rgba(255, 255, 255, 0.02);
-}
-
-.tab.active {
-    background: rgba(255, 255, 255, 0.08);
-    color: #ffffff;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
-/* ── Tab content ──────────────────────────────────────────────────────────── */
-.tab-content {
-    display: none;
-}
-
-.tab-content.active {
-    display: block;
-}
-
-/* ── Forms ────────────────────────────────────────────────────────────────── */
-.profile-form {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    padding-top: 8px;
-}
-
-.form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.form-row {
-    display: flex;
-    gap: 8px;
-}
-
-.form-row .form-group {
-    flex: 1;
-}
-
-label {
-    font-size: 12px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.5);
-}
-
-input,
-select,
-textarea {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
-    color: #ffffff;
-    font-family: inherit;
-    font-size: 13px;
-    padding: 8px 12px;
-    outline: none;
-    transition: border-color 0.2s, background 0.2s;
-    width: 100%;
-}
-
-input::placeholder,
-textarea::placeholder {
-    color: rgba(255, 255, 255, 0.22);
-}
-
-input:focus,
-select:focus,
-textarea:focus {
-    border-color: rgba(255, 255, 255, 0.18);
-    background: rgba(255, 255, 255, 0.06);
-}
-
-select {
-    appearance: none;
-    cursor: pointer;
-}
-
-select option {
-    background: #0a0a0a;
-    color: #ffffff;
-}
-
-textarea {
-    resize: vertical;
-    min-height: 80px;
-}
-
-.field-hint {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.3);
-}
-
-/* ── Buttons ──────────────────────────────────────────────────────────────── */
-.btn-primary {
-    background: transparent;
-    color: #ffffff;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 8px;
-    padding: 9px 16px;
-    font-family: inherit;
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.15s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-}
-
-.btn-primary:hover {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.2);
-}
-
-.btn-primary:active {
-    transform: scale(0.98);
-}
-
+/* Buttons */
 .btn-google {
     background: #ffffff;
     color: #0a0a0a;
     border: none;
     border-radius: 8px;
-    padding: 9px 16px;
+    padding: 10px 16px;
     font-family: inherit;
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.15s;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
     width: 100%;
+    transition: background 0.15s;
 }
 
-.btn-google:hover {
-    background: #f0f0f0;
-}
-
-.auth-divider {
-    display: flex;
-    align-items: center;
-    text-align: center;
-    color: rgba(255, 255, 255, 0.3);
-    font-size: 11px;
-    margin: 4px 0;
-}
-
-.auth-divider::before, .auth-divider::after {
-    content: '';
-    flex: 1;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.auth-divider span {
-    padding: 0 10px;
-}
-
-.btn-full {
-    width: 100%;
-}
+.btn-google:hover { background: #efefef; }
+.btn-google:disabled { opacity: 0.6; cursor: default; }
 
 .btn-ghost {
     background: transparent;
     border: none;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255,255,255,0.35);
     font-family: inherit;
     font-size: 12px;
     cursor: pointer;
-    transition: color 0.15s;
-    padding: 4px 8px;
+    padding: 4px 6px;
     border-radius: 6px;
+    transition: color 0.15s;
+}
+.btn-ghost:hover { color: #ffffff; }
+
+/* Action buttons */
+.actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 4px;
 }
 
-.btn-ghost:hover {
-    color: #ffffff;
-    background: rgba(255, 255, 255, 0.04);
+.btn-action {
+    width: 100%;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 9px;
+    color: #e8e8e8;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 11px 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.15s;
 }
 
-/* ── Misc ─────────────────────────────────────────────────────────────────── */
+.btn-action:hover {
+    background: rgba(255,255,255,0.07);
+    border-color: rgba(255,255,255,0.16);
+}
+
+.btn-action:disabled { opacity: 0.5; cursor: default; }
+
+.btn-action-secondary {
+    margin-top: 4px;
+    color: #5b9df5;
+    border-color: rgba(91,157,245,0.2);
+}
+
+.btn-action-secondary:hover {
+    background: rgba(91,157,245,0.06);
+    border-color: rgba(91,157,245,0.35);
+}
+
+.btn-action-secondary svg { stroke: #5b9df5; }
+
+.btn-action-blue {
+    color: #5b9df5;
+    border-color: rgba(91,157,245,0.2);
+}
+.btn-action-blue:hover {
+    background: rgba(91,157,245,0.06);
+    border-color: rgba(91,157,245,0.35);
+}
+
+.hint {
+    font-size: 11px;
+    color: rgba(255,255,255,0.25);
+    padding-left: 2px;
+    margin-bottom: 4px;
+}
+
+/* Nav header (add-job-view) */
+.nav-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+
+.nav-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.7);
+}
+
+/* Loading */
+.loading-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: rgba(255,255,255,0.4);
+    font-size: 12px;
+    padding: 8px 0;
+}
+
+.spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255,255,255,0.1);
+    border-top-color: rgba(255,255,255,0.5);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Add job form */
+.job-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+label {
+    font-size: 11px;
+    font-weight: 500;
+    color: rgba(255,255,255,0.4);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+input, select {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 7px;
+    color: #e8e8e8;
+    font-family: inherit;
+    font-size: 13px;
+    padding: 8px 10px;
+    outline: none;
+    transition: border-color 0.15s;
+    width: 100%;
+}
+
+input::placeholder { color: rgba(255,255,255,0.2); }
+input:focus, select:focus { border-color: rgba(255,255,255,0.2); background: rgba(255,255,255,0.07); }
+
+select { appearance: none; cursor: pointer; }
+select option { background: #111; }
+
+/* Error */
 .error-banner {
-    background: rgba(255, 107, 107, 0.1);
-    border: 1px solid rgba(255, 107, 107, 0.2);
+    background: rgba(255,107,107,0.1);
+    border: 1px solid rgba(255,107,107,0.2);
     border-radius: 8px;
     color: #ff6b6b;
     font-size: 12px;
     padding: 8px 12px;
-}
-
-.save-msg {
-    text-align: center;
-    font-size: 12px;
-    color: #8bc58b;
-    font-weight: 500;
 }

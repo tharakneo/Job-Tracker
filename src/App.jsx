@@ -160,6 +160,13 @@ const CsvIcon = () => (
   </svg>
 )
 
+const ProfileIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M20 21a8 8 0 0 0-16 0" />
+    <circle cx="12" cy="8" r="4" />
+  </svg>
+)
+
 
 
 function parseCSV(text) {
@@ -199,7 +206,37 @@ export default function App() {
   const [showFab, setShowFab] = useState(false)
   const [selectMode, setSelectMode] = useState(false)
   const [selectedJobs, setSelectedJobs] = useState(new Set())
+  const [user, setUser] = useState(null)
+  const [showProfileMenu, setShowProfileMenu] = useState(false)
+  const [activePanel, setActivePanel] = useState(null) // 'profile' | 'autofill' | null
+  const profileMenuRef = useRef(null)
 
+  // Auth
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => setUser(session?.user ?? null))
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => setUser(session?.user ?? null))
+    return () => subscription.unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    if (!showProfileMenu) return
+    const handler = (e) => {
+      if (!profileMenuRef.current?.contains(e.target)) setShowProfileMenu(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showProfileMenu])
+
+  async function signInWithGoogle() {
+    await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.href } })
+    setShowProfileMenu(false)
+  }
+
+  async function signOut() {
+    await supabase.auth.signOut()
+    setShowProfileMenu(false)
+    setActivePanel(null)
+  }
 
   const [notes, setNotes] = useState(() => {
     try { return JSON.parse(localStorage.getItem('jt-notes') || '[]') } catch { return [] }
@@ -211,35 +248,50 @@ export default function App() {
   useEffect(() => { localStorage.setItem('jt-notes', JSON.stringify(notes)) }, [notes])
   useEffect(() => { localStorage.setItem('jt-images', JSON.stringify(images)) }, [images])
 
-  // Fetch jobs from Supabase on mount
-  useEffect(() => {
-    async function fetchJobs() {
-      const { data, error } = await supabase
-        .from('jobs')
-        .select('*')
-        .order('added_at', { ascending: false })
-      if (!error && data) {
-        // Map snake_case DB columns to camelCase for the frontend
-        const mappedJobs = data.map(j => ({
-          id: j.id,
-          title: j.title,
-          company: j.company,
-          location: j.location,
-          url: j.url,
-          domain: j.domain,
-          logoUrl: j.logo_url,
-          fallbackLogoUrl: j.fallback_logo_url,
-          status: j.status,
-          addedAt: j.added_at
-        }))
-        setJobs(mappedJobs)
-      }
+  // Fetch jobs from Supabase
+  async function fetchJobs() {
+    const { data, error } = await supabase
+      .from('jobs')
+      .select('*')
+      .order('added_at', { ascending: false })
+    if (!error && data) {
+      setJobs(data.map(j => ({
+        id: j.id, title: j.title, company: j.company, location: j.location,
+        url: j.url, domain: j.domain, logoUrl: j.logo_url,
+        fallbackLogoUrl: j.fallback_logo_url, status: j.status, addedAt: j.added_at
+      })))
     }
-    fetchJobs()
+  }
+
+  useEffect(() => { fetchJobs() }, [])
+
+  // Re-fetch when tab becomes visible (catches jobs added from extension)
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') fetchJobs() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
   }, [])
 
-  // Currently we won't listen to the extension via localStorage jt-update anymore.
-  // We can implement Supabase Realtime later if needed.
+  // Realtime: update jobs list instantly when extension adds/moves/removes a job
+  useEffect(() => {
+    const mapRow = j => ({
+      id: j.id, title: j.title, company: j.company, location: j.location,
+      url: j.url, domain: j.domain, logoUrl: j.logo_url,
+      fallbackLogoUrl: j.fallback_logo_url, status: j.status, addedAt: j.added_at
+    })
+    const channel = supabase.channel('jobs-realtime')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'jobs' }, ({ new: j }) => {
+        setJobs(prev => prev.find(x => x.id === j.id) ? prev : [mapRow(j), ...prev])
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'jobs' }, ({ new: j }) => {
+        setJobs(prev => prev.map(x => x.id === j.id ? { ...x, ...mapRow(j) } : x))
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'jobs' }, ({ old: j }) => {
+        setJobs(prev => prev.filter(x => x.id !== j.id))
+      })
+      .subscribe()
+    return () => supabase.removeChannel(channel)
+  }, [])
 
   useEffect(() => {
     if (openMenu === null) return
@@ -416,6 +468,54 @@ export default function App() {
     <div className="app">
       {/* Absolute Logo */}
       <span className="brand absolute-brand"><span className="brand-jt">job tracker</span></span>
+
+      <div className="top-right-actions" ref={profileMenuRef}>
+        <button
+          className="profile-avatar-btn"
+          type="button"
+          aria-label="Profile"
+          onClick={() => setShowProfileMenu(v => !v)}
+        >
+          {user?.user_metadata?.avatar_url
+            ? <img className="profile-avatar-img" src={user.user_metadata.avatar_url} alt="" />
+            : <span className="profile-avatar-icon"><ProfileIcon /></span>
+          }
+        </button>
+
+        {showProfileMenu && (
+          <div className="profile-dropdown">
+            {user ? (
+              <>
+                <div className="profile-dropdown-header">
+                  <strong>{user.user_metadata?.full_name || 'Account'}</strong>
+                  <span>{user.email}</span>
+                </div>
+                <div className="dropdown-divider" />
+                <button onClick={() => { setActivePanel('profile'); setShowProfileMenu(false) }}>Profile</button>
+                <button onClick={() => { setActivePanel('autofill'); setShowProfileMenu(false) }}>Autofill</button>
+                <div className="dropdown-divider" />
+                <button className="destructive" onClick={signOut}>Sign out</button>
+              </>
+            ) : (
+              <>
+                <div className="profile-dropdown-header">
+                  <strong>Welcome</strong>
+                  <span>Sign in to save your data</span>
+                </div>
+                <div className="dropdown-divider" />
+                <button onClick={signInWithGoogle}>Sign in with Google</button>
+              </>
+            )}
+          </div>
+        )}
+
+        {activePanel === 'profile' && (
+          <ProfilePanel user={user} onClose={() => setActivePanel(null)} />
+        )}
+        {activePanel === 'autofill' && (
+          <AutofillPanel user={user} onClose={() => setActivePanel(null)} />
+        )}
+      </div>
 
       {/* Left sidebar */}
       <div className="sidebar">
@@ -811,6 +911,212 @@ function PolaroidImage({ image, onUpdate, onDelete }) {
           </button>
         )}
         <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} style={{ display: 'none' }} />
+      </div>
+    </div>
+  )
+}
+
+
+function ProfilePanel({ user, onClose }) {
+  const [data, setData] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('jt-profile') || '{}') } catch { return {} }
+  })
+
+  function set(key, val) { setData(prev => ({ ...prev, [key]: val })) }
+
+  function save() {
+    localStorage.setItem('jt-profile', JSON.stringify(data))
+    onClose()
+  }
+
+  return (
+    <div className="profile-panel">
+      <div className="profile-panel-header">
+        <span className="profile-panel-title">Profile</span>
+        <button className="panel-close" onClick={onClose}>&times;</button>
+      </div>
+      <div className="profile-scroll-area">
+        <div className="form-row">
+          <div className="form-group">
+            <label>First Name</label>
+            <input value={data.firstName || ''} onChange={e => set('firstName', e.target.value)} placeholder="First" />
+          </div>
+          <div className="form-group">
+            <label>Last Name</label>
+            <input value={data.lastName || ''} onChange={e => set('lastName', e.target.value)} placeholder="Last" />
+          </div>
+        </div>
+        <div className="form-group">
+          <label>Email</label>
+          <input value={user?.email || data.email || ''} onChange={e => set('email', e.target.value)} placeholder="you@email.com" readOnly={!!user?.email} style={user?.email ? { opacity: 0.5 } : {}} />
+        </div>
+        <div className="form-group">
+          <label>Phone</label>
+          <input value={data.phone || ''} onChange={e => set('phone', e.target.value)} placeholder="+1 (555) 000-0000" />
+        </div>
+        <div className="form-row">
+          <div className="form-group">
+            <label>City</label>
+            <input value={data.city || ''} onChange={e => set('city', e.target.value)} placeholder="City" />
+          </div>
+          <div className="form-group">
+            <label>State</label>
+            <input value={data.state || ''} onChange={e => set('state', e.target.value)} placeholder="State" />
+          </div>
+        </div>
+        <div className="form-group">
+          <label>LinkedIn</label>
+          <input value={data.linkedin || ''} onChange={e => set('linkedin', e.target.value)} placeholder="linkedin.com/in/yourname" />
+        </div>
+        <div className="form-group">
+          <label>Portfolio / Website</label>
+          <input value={data.website || ''} onChange={e => set('website', e.target.value)} placeholder="yoursite.com" />
+        </div>
+      </div>
+      <div className="profile-footer" style={{ display: 'flex' }}>
+        <button className="btn-cancel" onClick={onClose}>Cancel</button>
+        <button className="btn-save" onClick={save}>Save</button>
+      </div>
+    </div>
+  )
+}
+
+
+// Map website camelCase keys to Supabase profiles column names
+const AUTOFILL_TO_DB = {
+  firstName: 'first_name', lastName: 'last_name', email: 'email', phone: 'phone',
+  linkedin: 'linkedin_url', github: 'github_url', portfolio: 'portfolio_url',
+  city: 'city', state: 'state', zip: 'zip_code', country: 'country',
+  resumeUrl: 'resume_url',
+}
+const DB_TO_AUTOFILL = Object.fromEntries(Object.entries(AUTOFILL_TO_DB).map(([k, v]) => [v, k]))
+
+function AutofillPanel({ user, onClose }) {
+  const [data, setData] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('jt-autofill') || '{}') } catch { return {} }
+  })
+
+  useEffect(() => {
+    if (!user) return
+    supabase.from('profiles').select('*').eq('id', user.id).single().then(({ data: row }) => {
+      if (!row) return
+      const mapped = {}
+      Object.entries(row).forEach(([col, val]) => {
+        const key = DB_TO_AUTOFILL[col]
+        if (key && val != null) mapped[key] = val
+      })
+      setData(prev => ({ ...prev, ...mapped }))
+    })
+  }, [user])
+
+  function set(key, val) { setData(prev => ({ ...prev, [key]: val })) }
+
+  async function save() {
+    localStorage.setItem('jt-autofill', JSON.stringify(data))
+    if (user) {
+      const dbRow = { id: user.id }
+      Object.entries(AUTOFILL_TO_DB).forEach(([key, col]) => {
+        if (data[key] !== undefined) dbRow[col] = data[key]
+      })
+      await supabase.from('profiles').upsert(dbRow, { onConflict: 'id' })
+    }
+    onClose()
+  }
+
+  return (
+    <div className="profile-panel">
+      <div className="profile-panel-header">
+        <span className="profile-panel-title">Autofill</span>
+        <button className="panel-close" onClick={onClose}>&times;</button>
+      </div>
+      <div className="profile-scroll-area">
+        <div className="autofill-section-label">Personal</div>
+        <div className="form-row">
+          <div className="form-group">
+            <label>First Name</label>
+            <input value={data.firstName || ''} onChange={e => set('firstName', e.target.value)} placeholder="First" />
+          </div>
+          <div className="form-group">
+            <label>Last Name</label>
+            <input value={data.lastName || ''} onChange={e => set('lastName', e.target.value)} placeholder="Last" />
+          </div>
+        </div>
+        <div className="form-group">
+          <label>Email</label>
+          <input value={data.email || ''} onChange={e => set('email', e.target.value)} placeholder="you@email.com" />
+        </div>
+        <div className="form-group">
+          <label>Phone</label>
+          <input value={data.phone || ''} onChange={e => set('phone', e.target.value)} placeholder="+1 (555) 000-0000" />
+        </div>
+
+        <div className="autofill-section-label">Address</div>
+        <div className="form-group">
+          <label>Street</label>
+          <input value={data.street || ''} onChange={e => set('street', e.target.value)} placeholder="123 Main St" />
+        </div>
+        <div className="form-row">
+          <div className="form-group">
+            <label>City</label>
+            <input value={data.city || ''} onChange={e => set('city', e.target.value)} placeholder="City" />
+          </div>
+          <div className="form-group">
+            <label>State</label>
+            <input value={data.state || ''} onChange={e => set('state', e.target.value)} placeholder="State" />
+          </div>
+        </div>
+        <div className="form-row">
+          <div className="form-group">
+            <label>Zip</label>
+            <input value={data.zip || ''} onChange={e => set('zip', e.target.value)} placeholder="00000" />
+          </div>
+          <div className="form-group">
+            <label>Country</label>
+            <input value={data.country || ''} onChange={e => set('country', e.target.value)} placeholder="US" />
+          </div>
+        </div>
+
+        <div className="autofill-section-label">Links</div>
+        <div className="form-group">
+          <label>LinkedIn</label>
+          <input value={data.linkedin || ''} onChange={e => set('linkedin', e.target.value)} placeholder="linkedin.com/in/yourname" />
+        </div>
+        <div className="form-group">
+          <label>GitHub</label>
+          <input value={data.github || ''} onChange={e => set('github', e.target.value)} placeholder="github.com/yourname" />
+        </div>
+        <div className="form-group">
+          <label>Portfolio</label>
+          <input value={data.portfolio || ''} onChange={e => set('portfolio', e.target.value)} placeholder="yoursite.com" />
+        </div>
+        <div className="form-group">
+          <label>Resume URL</label>
+          <input value={data.resumeUrl || ''} onChange={e => set('resumeUrl', e.target.value)} placeholder="drive.google.com/..." />
+        </div>
+
+        <div className="autofill-section-label">Education</div>
+        <div className="form-group">
+          <label>University</label>
+          <input value={data.university || ''} onChange={e => set('university', e.target.value)} placeholder="University of ..." />
+        </div>
+        <div className="form-row">
+          <div className="form-group">
+            <label>Degree</label>
+            <input value={data.degree || ''} onChange={e => set('degree', e.target.value)} placeholder="B.S." />
+          </div>
+          <div className="form-group">
+            <label>Grad Year</label>
+            <input value={data.gradYear || ''} onChange={e => set('gradYear', e.target.value)} placeholder="2024" />
+          </div>
+        </div>
+        <div className="form-group">
+          <label>Field of Study</label>
+          <input value={data.major || ''} onChange={e => set('major', e.target.value)} placeholder="Computer Science" />
+        </div>
+      </div>
+      <div className="profile-footer" style={{ display: 'flex' }}>
+        <button className="btn-cancel" onClick={onClose}>Cancel</button>
+        <button className="btn-save" onClick={save}>Save</button>
       </div>
     </div>
   )
