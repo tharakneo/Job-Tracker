@@ -18,6 +18,16 @@ async function getTokens() {
     return { access: d.autofill_token || null, refresh: d.autofill_refresh || null };
 }
 
+function getUserIdFromToken(token) {
+    if (!token) return null;
+    try {
+        const payload = JSON.parse(atob(token.split(".")[1]));
+        return payload.sub || null;
+    } catch {
+        return null;
+    }
+}
+
 async function clearSession() {
     await chrome.storage.local.remove([
         "autofill_token", "autofill_refresh", "autofill_user_id", "autofill_token_ts",
@@ -88,7 +98,10 @@ async function supabaseFetch(path, options = {}) {
     try { data = text ? JSON.parse(text) : null; } catch { data = text; }
 
     if (!res.ok) {
-        const msg = data?.message || data?.error_description || data?.error || `Request failed (${res.status})`;
+        const rawMsg = data?.message || data?.error_description || data?.error || `Request failed (${res.status})`;
+        const msg = rawMsg.includes("Could not find the 'user_id' column of 'jobs'")
+            ? "Supabase is missing jobs.user_id. Run supabase/account_jobs_migration.sql in the SQL Editor, then reload the extension."
+            : rawMsg;
         throw new Error(msg);
     }
     return data;
@@ -175,25 +188,37 @@ async function handleMessage(message) {
     if (type === "ADD_JOB") {
         const j = message.data;
         const domain = extractDomain(j.url);
+        const token = await getValidToken();
+        const { autofill_user_id } = await chrome.storage.local.get("autofill_user_id");
+        const userId = autofill_user_id || getUserIdFromToken(token);
+        if (!userId) {
+            throw new Error("Not signed in — sign in with Google before saving jobs");
+        }
         const insertData = {
             id: crypto.randomUUID(),
-            title: j.title || "Unknown",
-            company: j.company || "Unknown",
-            location: j.location || "",
-            url: j.url || "",
+            title: (j.title || "Unknown").trim(),
+            company: (j.company || "Unknown").trim(),
+            location: (j.location || "").trim(),
+            url: (j.url || "").trim(),
             domain: domain || "",
             logo_url: domain ? `https://logo.clearbit.com/${domain}` : "",
             fallback_logo_url: domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=128` : "",
             status: j.status || "Applied",
             added_at: new Date().toISOString(),
+            user_id: userId,
         };
 
-        await supabaseFetch("/rest/v1/jobs", {
+        const inserted = await supabaseFetch("/rest/v1/jobs", {
             method: "POST",
-            headers: { Prefer: "return=minimal" },
+            headers: { Prefer: "return=representation" },
             body: JSON.stringify(insertData),
         });
-        return { success: true };
+
+        if (!inserted || (Array.isArray(inserted) && inserted.length === 0)) {
+            throw new Error("Job save did not return a record");
+        }
+
+        return { success: true, job: Array.isArray(inserted) ? inserted[0] : inserted };
     }
 
     // Content script message types — return empty (no AI backend)

@@ -167,6 +167,142 @@ const ProfileIcon = () => (
   </svg>
 )
 
+const AUTOFILL_STORAGE_KEY = 'jt-autofill'
+const AUTOFILL_MODULES = [
+  { id: 'profile', label: 'Profile' },
+  { id: 'work', label: 'Work' },
+  { id: 'education', label: 'Education' },
+  { id: 'eeo', label: 'EEO' },
+  { id: 'skills', label: 'Skills' },
+]
+
+function createWorkExperienceItem() {
+  return {
+    id: crypto.randomUUID(),
+    role: '',
+    company: '',
+    location: '',
+    startDate: '',
+    endDate: '',
+    summary: '',
+  }
+}
+
+function createEducationItem() {
+  return {
+    id: crypto.randomUUID(),
+    school: '',
+    degree: '',
+    field: '',
+    startDate: '',
+    endDate: '',
+    gpa: '',
+  }
+}
+
+function defaultAutofillData() {
+  return {
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    city: '',
+    state: '',
+    zip: '',
+    country: '',
+    linkedin: '',
+    github: '',
+    portfolio: '',
+    summary: '',
+    resumeText: '',
+    authorizedToWork: 'Yes',
+    sponsorshipNeeded: 'No',
+    gender: 'Prefer not to say',
+    race: 'Prefer not to say',
+    veteranStatus: 'Prefer not to say',
+    disabilityStatus: 'Prefer not to say',
+    skills: [''],
+    workExperience: [createWorkExperienceItem()],
+    education: [createEducationItem()],
+  }
+}
+
+function parseStoredJSON(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key) || 'null') ?? fallback } catch { return fallback }
+}
+
+function normalizeAutofillData(raw) {
+  const base = defaultAutofillData()
+  const data = raw && typeof raw === 'object' ? raw : {}
+
+  const workExperience = Array.isArray(data.workExperience) && data.workExperience.length > 0
+    ? data.workExperience.map(item => ({
+      ...createWorkExperienceItem(),
+      ...item,
+      id: item?.id || crypto.randomUUID(),
+    }))
+    : base.workExperience
+
+  const education = Array.isArray(data.education) && data.education.length > 0
+    ? data.education.map(item => ({
+      ...createEducationItem(),
+      ...item,
+      id: item?.id || crypto.randomUUID(),
+    }))
+    : base.education
+
+  const skills = Array.isArray(data.skills) && data.skills.length > 0
+    ? data.skills.map(skill => String(skill || ''))
+    : base.skills
+
+  return {
+    ...base,
+    ...data,
+    workExperience,
+    education,
+    skills,
+  }
+}
+
+function countFilled(values) {
+  return values.filter(value => String(value || '').trim()).length
+}
+
+function getAutofillModuleCounts(data) {
+  const profileCount = countFilled([
+    data.firstName, data.lastName, data.email, data.phone,
+    data.city, data.state, data.linkedin, data.portfolio,
+  ])
+  const workCount = data.workExperience.filter(item => item.role || item.company).length
+  const educationCount = data.education.filter(item => item.school || item.degree).length
+  const eeoCount = countFilled([data.authorizedToWork, data.sponsorshipNeeded, data.gender, data.race, data.veteranStatus, data.disabilityStatus])
+  const skillsCount = data.skills.filter(skill => skill.trim()).length
+
+  return {
+    profile: `${profileCount}/8`,
+    work: workCount || 0,
+    education: educationCount || 0,
+    eeo: `${eeoCount}/6`,
+    skills: skillsCount || 0,
+  }
+}
+
+function mergeProfileRowIntoAutofill(prev, row) {
+  const next = { ...prev }
+  Object.entries(row || {}).forEach(([col, val]) => {
+    const key = DB_TO_AUTOFILL[col]
+    if (key && val != null) next[key] = val
+  })
+  return normalizeAutofillData(next)
+}
+
+function buildProfileRowFromAutofill(data, userId) {
+  const dbRow = { id: userId }
+  Object.entries(AUTOFILL_TO_DB).forEach(([key, col]) => {
+    if (data[key] !== undefined) dbRow[col] = data[key]
+  })
+  return dbRow
+}
 
 
 function parseCSV(text) {
@@ -199,6 +335,7 @@ function parseCSV(text) {
 export default function App() {
   const [jobs, setJobs] = useState([])
   const [activeStatus, setActiveStatus] = useState('Applied')
+  const [activeAutofillModule, setActiveAutofillModule] = useState('profile')
   const [search, setSearch] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [toast, setToast] = useState(null)
@@ -207,14 +344,39 @@ export default function App() {
   const [selectMode, setSelectMode] = useState(false)
   const [selectedJobs, setSelectedJobs] = useState(new Set())
   const [user, setUser] = useState(null)
+  const [authReady, setAuthReady] = useState(false)
   const [showProfileMenu, setShowProfileMenu] = useState(false)
   const [activePanel, setActivePanel] = useState(null) // 'profile' | 'autofill' | null
+  const [autofillData, setAutofillData] = useState(() => normalizeAutofillData(parseStoredJSON(AUTOFILL_STORAGE_KEY, {})))
+  const [autofillSaving, setAutofillSaving] = useState(false)
   const profileMenuRef = useRef(null)
+  const schemaWarningShown = useRef(false)
+  const profileSchemaWarningShown = useRef(false)
+
+  function requireSignedInUser(action = 'continue') {
+    if (user?.id) return user.id
+    showToastMsg(`Sign in with Google to ${action}`)
+    return null
+  }
+
+  function isMissingJobsUserIdColumn(error) {
+    return Boolean(error?.message?.includes("Could not find the 'user_id' column of 'jobs'"))
+  }
+
+  function isMissingProfilesColumn(error) {
+    return Boolean(error?.message?.includes('profiles'))
+  }
 
   // Auth
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => setUser(session?.user ?? null))
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => setUser(session?.user ?? null))
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null)
+      setAuthReady(true)
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+      setUser(session?.user ?? null)
+      setAuthReady(true)
+    })
     return () => subscription.unsubscribe()
   }, [])
 
@@ -228,7 +390,7 @@ export default function App() {
   }, [showProfileMenu])
 
   async function signInWithGoogle() {
-    await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.href } })
+    await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } })
     setShowProfileMenu(false)
   }
 
@@ -248,13 +410,74 @@ export default function App() {
   useEffect(() => { localStorage.setItem('jt-notes', JSON.stringify(notes)) }, [notes])
   useEffect(() => { localStorage.setItem('jt-images', JSON.stringify(images)) }, [images])
 
+  useEffect(() => {
+    if (activePanel !== 'autofill') return
+    setShowModal(false)
+    setShowFab(false)
+    setOpenMenu(null)
+    setSelectMode(false)
+  }, [activePanel])
+
+  useEffect(() => {
+    if (activePanel !== 'autofill' || !user?.id) return
+
+    let cancelled = false
+    supabase.from('profiles').select('*').eq('id', user.id).single().then(({ data: row, error }) => {
+      if (cancelled) return
+      if (error) {
+        if (!profileSchemaWarningShown.current && isMissingProfilesColumn(error)) {
+          profileSchemaWarningShown.current = true
+          showToastMsg('Some profile fields are not in Supabase yet. Core autofill fields will still save.')
+        }
+        return
+      }
+      if (row) setAutofillData(prev => mergeProfileRowIntoAutofill(prev, row))
+    })
+
+    return () => { cancelled = true }
+  }, [activePanel, user?.id])
+
+  async function saveAutofillWorkspace() {
+    localStorage.setItem(AUTOFILL_STORAGE_KEY, JSON.stringify(autofillData))
+
+    if (!user?.id) {
+      showToastMsg('Autofill saved locally. Sign in with Google to sync it with the extension.')
+      return
+    }
+
+    setAutofillSaving(true)
+    try {
+      const dbRow = buildProfileRowFromAutofill(autofillData, user.id)
+      const { error } = await supabase.from('profiles').upsert(dbRow, { onConflict: 'id' })
+      if (error) throw error
+      showToastMsg('Autofill details saved')
+    } catch (error) {
+      showToastMsg(error.message || 'Could not save autofill details')
+    } finally {
+      setAutofillSaving(false)
+    }
+  }
+
   // Fetch jobs from Supabase
   async function fetchJobs() {
+    if (!authReady) return
+    if (!user?.id) {
+      setJobs([])
+      return
+    }
     const { data, error } = await supabase
       .from('jobs')
       .select('*')
+      .eq('user_id', user.id)
       .order('added_at', { ascending: false })
-    if (!error && data) {
+    if (error) {
+      if (!schemaWarningShown.current && isMissingJobsUserIdColumn(error)) {
+        schemaWarningShown.current = true
+        showToastMsg('Supabase is missing jobs.user_id. Run supabase/account_jobs_migration.sql in the SQL Editor.')
+      }
+      return
+    }
+    if (data) {
       setJobs(data.map(j => ({
         id: j.id, title: j.title, company: j.company, location: j.location,
         url: j.url, domain: j.domain, logoUrl: j.logo_url,
@@ -263,35 +486,41 @@ export default function App() {
     }
   }
 
-  useEffect(() => { fetchJobs() }, [])
+  useEffect(() => {
+    if (!authReady) return
+    fetchJobs()
+  }, [authReady, user?.id])
 
   // Re-fetch when tab becomes visible (catches jobs added from extension)
   useEffect(() => {
+    if (!authReady) return
     const onVisible = () => { if (document.visibilityState === 'visible') fetchJobs() }
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
-  }, [])
+  }, [authReady, user?.id])
 
   // Realtime: update jobs list instantly when extension adds/moves/removes a job
   useEffect(() => {
+    if (!authReady) return
     const mapRow = j => ({
       id: j.id, title: j.title, company: j.company, location: j.location,
       url: j.url, domain: j.domain, logoUrl: j.logo_url,
       fallbackLogoUrl: j.fallback_logo_url, status: j.status, addedAt: j.added_at
     })
+    if (!user?.id) return
     const channel = supabase.channel('jobs-realtime')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'jobs' }, ({ new: j }) => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'jobs', filter: `user_id=eq.${user.id}` }, ({ new: j }) => {
         setJobs(prev => prev.find(x => x.id === j.id) ? prev : [mapRow(j), ...prev])
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'jobs' }, ({ new: j }) => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'jobs', filter: `user_id=eq.${user.id}` }, ({ new: j }) => {
         setJobs(prev => prev.map(x => x.id === j.id ? { ...x, ...mapRow(j) } : x))
       })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'jobs' }, ({ old: j }) => {
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'jobs', filter: `user_id=eq.${user.id}` }, ({ old: j }) => {
         setJobs(prev => prev.filter(x => x.id !== j.id))
       })
       .subscribe()
     return () => supabase.removeChannel(channel)
-  }, [])
+  }, [authReady, user?.id])
 
   useEffect(() => {
     if (openMenu === null) return
@@ -316,6 +545,7 @@ export default function App() {
   const counts = {}
   STATUSES.forEach(s => { counts[s] = 0 })
   jobs.forEach(j => { if (counts[j.status] !== undefined) counts[j.status]++ })
+  const autofillModuleCounts = getAutofillModuleCounts(autofillData)
 
   const filtered = jobs.filter(j => {
     if (j.status !== activeStatus) return false
@@ -325,16 +555,18 @@ export default function App() {
   })
 
   async function deleteJob(id) {
+    if (!user?.id) return
     setJobs(prev => prev.filter(j => j.id !== id))
     setOpenMenu(null)
-    await supabase.from('jobs').delete().eq('id', id)
+    await supabase.from('jobs').delete().eq('id', id).eq('user_id', user.id)
   }
 
   async function moveJob(id, newStatus) {
+    if (!user?.id) return
     setJobs(prev => prev.map(j => j.id === id ? { ...j, status: newStatus } : j))
     setOpenMenu(null)
     showToastMsg(`Moved to ${newStatus}`)
-    await supabase.from('jobs').update({ status: newStatus }).eq('id', id)
+    await supabase.from('jobs').update({ status: newStatus }).eq('id', id).eq('user_id', user.id)
   }
 
   function copyLink(job) {
@@ -359,22 +591,27 @@ export default function App() {
   }
 
   async function bulkDeleteSelected() {
+    if (!user?.id) return
     const idsToDelete = Array.from(selectedJobs)
     setJobs(prev => prev.filter(j => !selectedJobs.has(j.id)))
     setSelectedJobs(new Set())
     showToastMsg(`Removed ${idsToDelete.length} jobs`)
-    await supabase.from('jobs').delete().in('id', idsToDelete)
+    await supabase.from('jobs').delete().in('id', idsToDelete).eq('user_id', user.id)
   }
 
   async function bulkMoveSelected(newStatus) {
+    if (!user?.id) return
     const idsToMove = Array.from(selectedJobs)
     setJobs(prev => prev.map(j => selectedJobs.has(j.id) ? { ...j, status: newStatus } : j))
     setSelectedJobs(new Set())
     showToastMsg(`Moved ${idsToMove.length} jobs to ${newStatus}`)
-    await supabase.from('jobs').update({ status: newStatus }).in('id', idsToMove)
+    await supabase.from('jobs').update({ status: newStatus }).in('id', idsToMove).eq('user_id', user.id)
   }
 
   async function addJob(job) {
+    const userId = requireSignedInUser('save jobs')
+    if (!userId) return
+
     // Generate UUID if not provided by crypto (though crypto should work)
     const newId = crypto.randomUUID()
     const jobToInsert = { ...job, id: newId }
@@ -386,6 +623,7 @@ export default function App() {
     // Save to Supabase
     await supabase.from('jobs').insert([{
       id: newId,
+      user_id: userId,
       title: job.title,
       company: job.company,
       location: job.location,
@@ -398,6 +636,9 @@ export default function App() {
   }
 
   async function bulkAdd(newJobs) {
+    const userId = requireSignedInUser('import jobs')
+    if (!userId) return
+
     // Optimistic UI update
     setJobs(prev => [...newJobs, ...prev])
     showToastMsg(`Imported ${newJobs.length} jobs`)
@@ -405,6 +646,7 @@ export default function App() {
     // Map to snake_case for Supabase
     const supabaseJobs = newJobs.map(j => ({
       id: j.id,
+      user_id: userId,
       title: j.title,
       company: j.company,
       location: j.location,
@@ -492,7 +734,7 @@ export default function App() {
                 </div>
                 <div className="dropdown-divider" />
                 <button onClick={() => { setActivePanel('profile'); setShowProfileMenu(false) }}>Profile</button>
-                <button onClick={() => { setActivePanel('autofill'); setShowProfileMenu(false) }}>Autofill</button>
+                <button onClick={() => { setActiveAutofillModule('profile'); setActivePanel('autofill'); setShowProfileMenu(false) }}>Autofill</button>
                 <div className="dropdown-divider" />
                 <button className="destructive" onClick={signOut}>Sign out</button>
               </>
@@ -512,153 +754,178 @@ export default function App() {
         {activePanel === 'profile' && (
           <ProfilePanel user={user} onClose={() => setActivePanel(null)} />
         )}
-        {activePanel === 'autofill' && (
-          <AutofillPanel user={user} onClose={() => setActivePanel(null)} />
-        )}
       </div>
 
       {/* Left sidebar */}
       <div className="sidebar">
-        <nav className="sidebar-nav">
-          {STATUSES.map(s => (
-            <button
-              key={s}
-              className={`sidebar-item${activeStatus === s ? ' active' : ''}`}
-              onClick={() => { setActiveStatus(s); setSelectMode(false); setSelectedJobs(new Set()); setSearch(''); }}
-            >
-              <span className="sidebar-item-label">{s}</span>
-              <span className="sidebar-item-count">{counts[s]}</span>
-            </button>
-          ))}
-        </nav>
+        {activePanel === 'autofill' ? (
+          <>
+            <nav className="sidebar-nav">
+              {AUTOFILL_MODULES.map(module => (
+                <button
+                  key={module.id}
+                  className={`sidebar-item${activeAutofillModule === module.id ? ' active' : ''}`}
+                  onClick={() => setActiveAutofillModule(module.id)}
+                >
+                  <span className="sidebar-item-label">{module.label}</span>
+                  <span className="sidebar-item-count">{autofillModuleCounts[module.id]}</span>
+                </button>
+              ))}
+            </nav>
+            <button className="sidebar-back-btn" onClick={() => setActivePanel(null)}>Back to Jobs</button>
+          </>
+        ) : (
+          <nav className="sidebar-nav">
+            {STATUSES.map(s => (
+              <button
+                key={s}
+                className={`sidebar-item${activeStatus === s ? ' active' : ''}`}
+                onClick={() => { setActivePanel(null); setActiveStatus(s); setSelectMode(false); setSelectedJobs(new Set()); setSearch(''); }}
+              >
+                <span className="sidebar-item-label">{s}</span>
+                <span className="sidebar-item-count">{counts[s]}</span>
+              </button>
+            ))}
+          </nav>
+        )}
       </div>
 
       {/* Main panel */}
       <div className="main">
         <div className="jobs-card">
-          {/* Top bar inside the card */}
-          <div className="jobs-topbar">
-            {selectMode ? (
-              <div className="bulk-bar">
-                <label className="checkbox-container" onClick={e => e.stopPropagation()} style={{ marginRight: '4px' }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedJobs.size === filtered.length && filtered.length > 0}
-                    onChange={toggleSelectAll}
-                  />
-                  <span className="checkmark"></span>
-                </label>
-                <span className="bulk-label">Select All</span>
-                <span className="bulk-count">{selectedJobs.size} selected</span>
-                <div className="bulk-spacer" />
-                <select className="bulk-move" onChange={e => { if (e.target.value) { bulkMoveSelected(e.target.value); setSelectMode(false); } }} value="">
-                  <option value="" disabled>Move to...</option>
-                  {STATUSES.filter(s => s !== activeStatus).map(s => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-                <button className="bulk-remove" onClick={() => { bulkDeleteSelected(); setSelectMode(false); }} disabled={selectedJobs.size === 0}>Remove</button>
-                <button className="bulk-done" onClick={() => { setSelectMode(false); setSelectedJobs(new Set()); }}>Done</button>
-              </div>
-            ) : (
-              <>
-                <div className="search-wrap">
-                  <SearchIcon />
-                  <input
-                    className="search-input"
-                    placeholder="Search"
-                    value={search}
-                    onChange={e => setSearch(e.target.value)}
-                  />
-                </div>
-                <div className="btn-add-wrap" style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <button className="btn-add" onClick={() => { setShowFab(!showFab); setShowModal(false); }}>
-                    <PlusIcon /> Add
-                  </button>
-                  {showFab && (
-                    <div className="fab-dropdown" onClick={e => e.stopPropagation()} style={{ top: 'calc(100% + 8px)', right: 0 }}>
-                      <button onClick={() => { setShowModal(true); setShowFab(false); }}>Job</button>
-                      <button onClick={addNote}>Note</button>
-                      <button onClick={addImage}>Image</button>
-                    </div>
-                  )}
-                  {showModal && (
-                    <div className="side-panel" onClick={e => e.stopPropagation()}>
-                      <AddJobPanel
-                        onClose={() => setShowModal(false)}
-                        onAdd={addJob}
-                        onBulkAdd={bulkAdd}
-                      />
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Job list */}
-          <div className="jobs-list">
-            {filtered.length === 0 ? (
-              <div className="empty-state">
-                <p>No {activeStatus.toLowerCase()} jobs</p>
-                <p>Click "+ Add Job" to get started</p>
-              </div>
-            ) : (
-              filtered.map(job => (
-                <div className={`job-item${selectedJobs.has(job.id) ? ' selected' : ''}`} key={job.id}>
-                  {selectMode && (
-                    <label className="checkbox-container job-checkbox" onClick={e => e.stopPropagation()}>
+          {activePanel === 'autofill' ? (
+            <AutofillWorkspace
+              data={autofillData}
+              setData={setAutofillData}
+              activeModule={activeAutofillModule}
+              onClose={() => setActivePanel(null)}
+              onSave={saveAutofillWorkspace}
+              saving={autofillSaving}
+            />
+          ) : (
+            <>
+              <div className="jobs-topbar">
+                {selectMode ? (
+                  <div className="bulk-bar">
+                    <label className="checkbox-container" onClick={e => e.stopPropagation()} style={{ marginRight: '4px' }}>
                       <input
                         type="checkbox"
-                        checked={selectedJobs.has(job.id)}
-                        onChange={() => toggleSelect(job.id)}
+                        checked={selectedJobs.size === filtered.length && filtered.length > 0}
+                        onChange={toggleSelectAll}
                       />
                       <span className="checkmark"></span>
                     </label>
-                  )}
-                  <div className="job-info">
-                    {job.url ? (
-                      <a className="job-title" href={job.url} target="_blank" rel="noopener noreferrer">{job.title}</a>
-                    ) : (
-                      <div className="job-title">{job.title}</div>
-                    )}
-                    <div className="job-company">{job.company}</div>
-                    {job.location && <div className="job-location">{job.location}</div>}
-                    <div className="job-posted">{timeAgo((job.addedAt || new Date()).toString(), job.status)}</div>
+                    <span className="bulk-label">Select All</span>
+                    <span className="bulk-count">{selectedJobs.size} selected</span>
+                    <div className="bulk-spacer" />
+                    <select className="bulk-move" onChange={e => { if (e.target.value) { bulkMoveSelected(e.target.value); setSelectMode(false); } }} value="">
+                      <option value="" disabled>Move to...</option>
+                      {STATUSES.filter(s => s !== activeStatus).map(s => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                    <button className="bulk-remove" onClick={() => { bulkDeleteSelected(); setSelectMode(false); }} disabled={selectedJobs.size === 0}>Remove</button>
+                    <button className="bulk-done" onClick={() => { setSelectMode(false); setSelectedJobs(new Set()); }}>Done</button>
                   </div>
-                  <div className="job-right" style={{ position: 'relative' }}>
-                    <button
-                      className="job-dots"
-                      onClick={e => { e.stopPropagation(); setOpenMenu(openMenu === job.id ? null : job.id) }}
-                    >
-                      <DotsIcon />
-                    </button>
-                    {openMenu === job.id && (
-                      <div className="job-dropdown">
-                        <button onClick={() => copyLink(job)}>Copy link</button>
-                        <div className="dropdown-divider" />
-                        <button onClick={() => { setSelectMode(true); setSelectedJobs(new Set([job.id])); setOpenMenu(null); }}>Select</button>
-                        <div className="dropdown-divider" />
-                        {STATUSES.filter(s => s !== job.status).map(s => (
-                          <button key={s} onClick={() => moveJob(job.id, s)}>Move to {s}</button>
-                        ))}
-                        <div className="dropdown-divider" />
-                        <button className="destructive" onClick={() => deleteJob(job.id)}>Remove</button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
+                ) : (
+                  <>
+                    <div className="search-wrap">
+                      <SearchIcon />
+                      <input
+                        className="search-input"
+                        placeholder="Search"
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                      />
+                    </div>
+                    <div className="btn-add-wrap" style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <button className="btn-add" onClick={() => { setShowFab(!showFab); setShowModal(false); }}>
+                        <PlusIcon /> Add
+                      </button>
+                      {showFab && (
+                        <div className="fab-dropdown" onClick={e => e.stopPropagation()} style={{ top: 'calc(100% + 8px)', right: 0 }}>
+                          <button onClick={() => { setShowModal(true); setShowFab(false); }}>Job</button>
+                          <button onClick={addNote}>Note</button>
+                          <button onClick={addImage}>Image</button>
+                        </div>
+                      )}
+                      {showModal && (
+                        <div className="side-panel" onClick={e => e.stopPropagation()}>
+                          <AddJobPanel
+                            onClose={() => setShowModal(false)}
+                            onAdd={addJob}
+                            onBulkAdd={bulkAdd}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
 
+              <div className="jobs-list">
+                {filtered.length === 0 ? (
+                  <div className="empty-state">
+                    <p>No {activeStatus.toLowerCase()} jobs</p>
+                    <p>Click "+ Add Job" to get started</p>
+                  </div>
+                ) : (
+                  filtered.map(job => (
+                    <div className={`job-item${selectedJobs.has(job.id) ? ' selected' : ''}`} key={job.id}>
+                      {selectMode && (
+                        <label className="checkbox-container job-checkbox" onClick={e => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={selectedJobs.has(job.id)}
+                            onChange={() => toggleSelect(job.id)}
+                          />
+                          <span className="checkmark"></span>
+                        </label>
+                      )}
+                      <div className="job-info">
+                        {job.url ? (
+                          <a className="job-title" href={job.url} target="_blank" rel="noopener noreferrer">{job.title}</a>
+                        ) : (
+                          <div className="job-title">{job.title}</div>
+                        )}
+                        <div className="job-company">{job.company}</div>
+                        {job.location && <div className="job-location">{job.location}</div>}
+                        <div className="job-posted">{timeAgo((job.addedAt || new Date()).toString(), job.status)}</div>
+                      </div>
+                      <div className="job-right" style={{ position: 'relative' }}>
+                        <button
+                          className="job-dots"
+                          onClick={e => { e.stopPropagation(); setOpenMenu(openMenu === job.id ? null : job.id) }}
+                        >
+                          <DotsIcon />
+                        </button>
+                        {openMenu === job.id && (
+                          <div className="job-dropdown">
+                            <button onClick={() => copyLink(job)}>Copy link</button>
+                            <div className="dropdown-divider" />
+                            <button onClick={() => { setSelectMode(true); setSelectedJobs(new Set([job.id])); setOpenMenu(null); }}>Select</button>
+                            <div className="dropdown-divider" />
+                            {STATUSES.filter(s => s !== job.status).map(s => (
+                              <button key={s} onClick={() => moveJob(job.id, s)}>Move to {s}</button>
+                            ))}
+                            <div className="dropdown-divider" />
+                            <button className="destructive" onClick={() => deleteJob(job.id)}>Remove</button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {toast && <div className="toast">{toast}</div>}
 
 
-      {notes.map(note => (
+      {activePanel !== 'autofill' && notes.map(note => (
         <StickyNote
           key={note.id}
           note={note}
@@ -668,7 +935,7 @@ export default function App() {
       ))}
 
 
-      {images.map(img => (
+      {activePanel !== 'autofill' && images.map(img => (
         <PolaroidImage
           key={img.id}
           image={img}
@@ -987,137 +1254,211 @@ const AUTOFILL_TO_DB = {
   firstName: 'first_name', lastName: 'last_name', email: 'email', phone: 'phone',
   linkedin: 'linkedin_url', github: 'github_url', portfolio: 'portfolio_url',
   city: 'city', state: 'state', zip: 'zip_code', country: 'country',
-  resumeUrl: 'resume_url',
+  authorizedToWork: 'authorized_to_work',
+  sponsorshipNeeded: 'sponsorship_needed',
+  gender: 'gender',
+  race: 'race',
+  veteranStatus: 'veteran_status',
+  disabilityStatus: 'disability_status',
+  resumeText: 'resume_text',
 }
 const DB_TO_AUTOFILL = Object.fromEntries(Object.entries(AUTOFILL_TO_DB).map(([k, v]) => [v, k]))
 
-function AutofillPanel({ user, onClose }) {
-  const [data, setData] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('jt-autofill') || '{}') } catch { return {} }
-  })
-
-  useEffect(() => {
-    if (!user) return
-    supabase.from('profiles').select('*').eq('id', user.id).single().then(({ data: row }) => {
-      if (!row) return
-      const mapped = {}
-      Object.entries(row).forEach(([col, val]) => {
-        const key = DB_TO_AUTOFILL[col]
-        if (key && val != null) mapped[key] = val
-      })
-      setData(prev => ({ ...prev, ...mapped }))
-    })
-  }, [user])
-
-  function set(key, val) { setData(prev => ({ ...prev, [key]: val })) }
-
-  async function save() {
-    localStorage.setItem('jt-autofill', JSON.stringify(data))
-    if (user) {
-      const dbRow = { id: user.id }
-      Object.entries(AUTOFILL_TO_DB).forEach(([key, col]) => {
-        if (data[key] !== undefined) dbRow[col] = data[key]
-      })
-      await supabase.from('profiles').upsert(dbRow, { onConflict: 'id' })
-    }
-    onClose()
+function AutofillWorkspace({ data, setData, activeModule, onClose, onSave, saving }) {
+  function setField(key, value) {
+    setData(prev => ({ ...prev, [key]: value }))
   }
 
+  function updateCollection(key, id, updates) {
+    setData(prev => ({
+      ...prev,
+      [key]: prev[key].map(item => item.id === id ? { ...item, ...updates } : item),
+    }))
+  }
+
+  function addCollectionItem(key, factory) {
+    setData(prev => ({ ...prev, [key]: [...prev[key], factory()] }))
+  }
+
+  function removeCollectionItem(key, id) {
+    setData(prev => ({
+      ...prev,
+      [key]: prev[key].length > 1 ? prev[key].filter(item => item.id !== id) : prev[key],
+    }))
+  }
+
+  function updateSkill(index, value) {
+    setData(prev => ({
+      ...prev,
+      skills: prev.skills.map((skill, skillIndex) => skillIndex === index ? value : skill),
+    }))
+  }
+
+  function addSkill() {
+    setData(prev => ({ ...prev, skills: [...prev.skills, ''] }))
+  }
+
+  function removeSkill(index) {
+    setData(prev => ({
+      ...prev,
+      skills: prev.skills.length > 1 ? prev.skills.filter((_, skillIndex) => skillIndex !== index) : prev.skills,
+    }))
+  }
+
+  const moduleLabel = AUTOFILL_MODULES.find(m => m.id === activeModule)?.label || 'Autofill'
+
   return (
-    <div className="profile-panel">
-      <div className="profile-panel-header">
-        <span className="profile-panel-title">Autofill</span>
-        <button className="panel-close" onClick={onClose}>&times;</button>
+    <>
+      <div className="jobs-topbar">
+        <span className="autofill-topbar-title">{moduleLabel}</span>
+        <div style={{ flex: 1 }} />
+        <button className="btn-cancel" onClick={onClose}>Close</button>
+        <button className="btn-save" onClick={onSave} disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
       </div>
-      <div className="profile-scroll-area">
-        <div className="autofill-section-label">Personal</div>
-        <div className="form-row">
-          <div className="form-group">
-            <label>First Name</label>
-            <input value={data.firstName || ''} onChange={e => set('firstName', e.target.value)} placeholder="First" />
-          </div>
-          <div className="form-group">
-            <label>Last Name</label>
-            <input value={data.lastName || ''} onChange={e => set('lastName', e.target.value)} placeholder="Last" />
-          </div>
-        </div>
-        <div className="form-group">
-          <label>Email</label>
-          <input value={data.email || ''} onChange={e => set('email', e.target.value)} placeholder="you@email.com" />
-        </div>
-        <div className="form-group">
-          <label>Phone</label>
-          <input value={data.phone || ''} onChange={e => set('phone', e.target.value)} placeholder="+1 (555) 000-0000" />
-        </div>
 
-        <div className="autofill-section-label">Address</div>
-        <div className="form-group">
-          <label>Street</label>
-          <input value={data.street || ''} onChange={e => set('street', e.target.value)} placeholder="123 Main St" />
-        </div>
-        <div className="form-row">
-          <div className="form-group">
-            <label>City</label>
-            <input value={data.city || ''} onChange={e => set('city', e.target.value)} placeholder="City" />
-          </div>
-          <div className="form-group">
-            <label>State</label>
-            <input value={data.state || ''} onChange={e => set('state', e.target.value)} placeholder="State" />
-          </div>
-        </div>
-        <div className="form-row">
-          <div className="form-group">
-            <label>Zip</label>
-            <input value={data.zip || ''} onChange={e => set('zip', e.target.value)} placeholder="00000" />
-          </div>
-          <div className="form-group">
-            <label>Country</label>
-            <input value={data.country || ''} onChange={e => set('country', e.target.value)} placeholder="US" />
-          </div>
-        </div>
+      <div className="jobs-list autofill-form">
+        {activeModule === 'profile' && (
+          <>
+            <div className="form-row">
+              <div className="form-group"><label>First Name</label><input value={data.firstName} onChange={e => setField('firstName', e.target.value)} placeholder="First" /></div>
+              <div className="form-group"><label>Last Name</label><input value={data.lastName} onChange={e => setField('lastName', e.target.value)} placeholder="Last" /></div>
+            </div>
+            <div className="form-row">
+              <div className="form-group"><label>Email</label><input value={data.email} onChange={e => setField('email', e.target.value)} placeholder="you@email.com" /></div>
+              <div className="form-group"><label>Phone</label><input value={data.phone} onChange={e => setField('phone', e.target.value)} placeholder="+1 (555) 000-0000" /></div>
+            </div>
+            <div className="form-row">
+              <div className="form-group"><label>City</label><input value={data.city} onChange={e => setField('city', e.target.value)} placeholder="City" /></div>
+              <div className="form-group"><label>State</label><input value={data.state} onChange={e => setField('state', e.target.value)} placeholder="State" /></div>
+            </div>
+            <div className="form-row">
+              <div className="form-group"><label>ZIP</label><input value={data.zip} onChange={e => setField('zip', e.target.value)} placeholder="10001" /></div>
+              <div className="form-group"><label>Country</label><input value={data.country} onChange={e => setField('country', e.target.value)} placeholder="United States" /></div>
+            </div>
+            <div className="form-group"><label>LinkedIn</label><input value={data.linkedin} onChange={e => setField('linkedin', e.target.value)} placeholder="linkedin.com/in/yourname" /></div>
+            <div className="form-row">
+              <div className="form-group"><label>GitHub</label><input value={data.github} onChange={e => setField('github', e.target.value)} placeholder="github.com/yourname" /></div>
+              <div className="form-group"><label>Portfolio</label><input value={data.portfolio} onChange={e => setField('portfolio', e.target.value)} placeholder="yourwebsite.com" /></div>
+            </div>
+            <div className="form-group"><label>Summary</label><textarea rows="3" value={data.summary} onChange={e => setField('summary', e.target.value)} placeholder="2-3 lines about your focus and target roles." /></div>
+            <div className="form-group"><label>Resume Text</label><textarea rows="5" value={data.resumeText} onChange={e => setField('resumeText', e.target.value)} placeholder="Paste plain-text resume for autofill context." /></div>
+          </>
+        )}
 
-        <div className="autofill-section-label">Links</div>
-        <div className="form-group">
-          <label>LinkedIn</label>
-          <input value={data.linkedin || ''} onChange={e => set('linkedin', e.target.value)} placeholder="linkedin.com/in/yourname" />
-        </div>
-        <div className="form-group">
-          <label>GitHub</label>
-          <input value={data.github || ''} onChange={e => set('github', e.target.value)} placeholder="github.com/yourname" />
-        </div>
-        <div className="form-group">
-          <label>Portfolio</label>
-          <input value={data.portfolio || ''} onChange={e => set('portfolio', e.target.value)} placeholder="yoursite.com" />
-        </div>
-        <div className="form-group">
-          <label>Resume URL</label>
-          <input value={data.resumeUrl || ''} onChange={e => set('resumeUrl', e.target.value)} placeholder="drive.google.com/..." />
-        </div>
+        {activeModule === 'work' && (
+          <>
+            {data.workExperience.map((item, index) => (
+              <div key={item.id} className="autofill-module-card">
+                <div className="autofill-module-card-head">
+                  <strong>Role {index + 1}</strong>
+                  <button className="module-remove-btn" onClick={() => removeCollectionItem('workExperience', item.id)}>Remove</button>
+                </div>
+                <div className="form-row">
+                  <div className="form-group"><label>Title</label><input value={item.role} onChange={e => updateCollection('workExperience', item.id, { role: e.target.value })} placeholder="Software Engineer" /></div>
+                  <div className="form-group"><label>Company</label><input value={item.company} onChange={e => updateCollection('workExperience', item.id, { company: e.target.value })} placeholder="Tesla" /></div>
+                </div>
+                <div className="form-row">
+                  <div className="form-group"><label>Location</label><input value={item.location} onChange={e => updateCollection('workExperience', item.id, { location: e.target.value })} placeholder="Fremont, CA" /></div>
+                  <div className="form-group"><label>Start</label><input value={item.startDate} onChange={e => updateCollection('workExperience', item.id, { startDate: e.target.value })} placeholder="May 2025" /></div>
+                  <div className="form-group"><label>End</label><input value={item.endDate} onChange={e => updateCollection('workExperience', item.id, { endDate: e.target.value })} placeholder="Present" /></div>
+                </div>
+                <div className="form-group"><label>Bullets</label><textarea rows="4" value={item.summary} onChange={e => updateCollection('workExperience', item.id, { summary: e.target.value })} placeholder="Built X, improved Y by Z%..." /></div>
+              </div>
+            ))}
+            <button className="module-add-btn" onClick={() => addCollectionItem('workExperience', createWorkExperienceItem)}>+ Add Role</button>
+          </>
+        )}
 
-        <div className="autofill-section-label">Education</div>
-        <div className="form-group">
-          <label>University</label>
-          <input value={data.university || ''} onChange={e => set('university', e.target.value)} placeholder="University of ..." />
-        </div>
-        <div className="form-row">
-          <div className="form-group">
-            <label>Degree</label>
-            <input value={data.degree || ''} onChange={e => set('degree', e.target.value)} placeholder="B.S." />
-          </div>
-          <div className="form-group">
-            <label>Grad Year</label>
-            <input value={data.gradYear || ''} onChange={e => set('gradYear', e.target.value)} placeholder="2024" />
-          </div>
-        </div>
-        <div className="form-group">
-          <label>Field of Study</label>
-          <input value={data.major || ''} onChange={e => set('major', e.target.value)} placeholder="Computer Science" />
-        </div>
+        {activeModule === 'education' && (
+          <>
+            {data.education.map((item, index) => (
+              <div key={item.id} className="autofill-module-card">
+                <div className="autofill-module-card-head">
+                  <strong>School {index + 1}</strong>
+                  <button className="module-remove-btn" onClick={() => removeCollectionItem('education', item.id)}>Remove</button>
+                </div>
+                <div className="form-group"><label>School</label><input value={item.school} onChange={e => updateCollection('education', item.id, { school: e.target.value })} placeholder="UC Berkeley" /></div>
+                <div className="form-row">
+                  <div className="form-group"><label>Degree</label><input value={item.degree} onChange={e => updateCollection('education', item.id, { degree: e.target.value })} placeholder="B.S." /></div>
+                  <div className="form-group"><label>Field</label><input value={item.field} onChange={e => updateCollection('education', item.id, { field: e.target.value })} placeholder="Computer Science" /></div>
+                  <div className="form-group"><label>GPA</label><input value={item.gpa} onChange={e => updateCollection('education', item.id, { gpa: e.target.value })} placeholder="3.8" /></div>
+                </div>
+                <div className="form-row">
+                  <div className="form-group"><label>Start</label><input value={item.startDate} onChange={e => updateCollection('education', item.id, { startDate: e.target.value })} placeholder="2022" /></div>
+                  <div className="form-group"><label>End</label><input value={item.endDate} onChange={e => updateCollection('education', item.id, { endDate: e.target.value })} placeholder="2026" /></div>
+                </div>
+              </div>
+            ))}
+            <button className="module-add-btn" onClick={() => addCollectionItem('education', createEducationItem)}>+ Add School</button>
+          </>
+        )}
+
+        {activeModule === 'eeo' && (
+          <>
+            <div className="form-row">
+              <div className="form-group"><label>Authorized to Work</label>
+                <select value={data.authorizedToWork} onChange={e => setField('authorizedToWork', e.target.value)}>
+                  <option>Yes</option><option>No</option><option>Prefer not to say</option>
+                </select>
+              </div>
+              <div className="form-group"><label>Need Sponsorship</label>
+                <select value={data.sponsorshipNeeded} onChange={e => setField('sponsorshipNeeded', e.target.value)}>
+                  <option>No</option><option>Yes</option><option>Prefer not to say</option>
+                </select>
+              </div>
+            </div>
+            <div className="form-row">
+              <div className="form-group"><label>Gender</label>
+                <select value={data.gender} onChange={e => setField('gender', e.target.value)}>
+                  <option>Prefer not to say</option><option>Male</option><option>Female</option><option>Non-binary</option><option>Other</option>
+                </select>
+              </div>
+              <div className="form-group"><label>Race / Ethnicity</label>
+                <select value={data.race} onChange={e => setField('race', e.target.value)}>
+                  <option>Prefer not to say</option>
+                  <option>American Indian or Alaska Native</option>
+                  <option>Asian</option>
+                  <option>Black or African American</option>
+                  <option>Hispanic or Latino</option>
+                  <option>Native Hawaiian or Other Pacific Islander</option>
+                  <option>White</option>
+                  <option>Two or More Races</option>
+                </select>
+              </div>
+            </div>
+            <div className="form-row">
+              <div className="form-group"><label>Veteran Status</label>
+                <select value={data.veteranStatus} onChange={e => setField('veteranStatus', e.target.value)}>
+                  <option>Prefer not to say</option>
+                  <option>I am not a protected veteran</option>
+                  <option>I identify as a protected veteran</option>
+                </select>
+              </div>
+              <div className="form-group"><label>Disability Status</label>
+                <select value={data.disabilityStatus} onChange={e => setField('disabilityStatus', e.target.value)}>
+                  <option>Prefer not to say</option>
+                  <option>No, I do not have a disability</option>
+                  <option>Yes, I have a disability</option>
+                </select>
+              </div>
+            </div>
+          </>
+        )}
+
+        {activeModule === 'skills' && (
+          <>
+            <div className="autofill-skills-grid">
+              {data.skills.map((skill, index) => (
+                <div key={`${index}-${skill}`} className="autofill-skill-row">
+                  <input value={skill} onChange={e => updateSkill(index, e.target.value)} placeholder="React, SQL, Python..." />
+                  <button className="module-remove-btn" onClick={() => removeSkill(index)}>Remove</button>
+                </div>
+              ))}
+            </div>
+            <button className="module-add-btn" onClick={addSkill}>+ Add Skill</button>
+          </>
+        )}
       </div>
-      <div className="profile-footer" style={{ display: 'flex' }}>
-        <button className="btn-cancel" onClick={onClose}>Cancel</button>
-        <button className="btn-save" onClick={save}>Save</button>
-      </div>
-    </div>
+    </>
   )
 }
