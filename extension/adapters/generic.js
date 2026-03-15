@@ -101,26 +101,45 @@ const GenericAdapter = {
 function localMatch(label, profile) {
     const l = label.toLowerCase().replace(/[^a-z0-9 ]/g, " ");
 
-    if (/first.?name|given.?name/.test(l)) return profile.first_name;
-    if (/last.?name|surname|family.?name/.test(l)) return profile.last_name;
+    if (/first.?name|given.?name/.test(l)) return profile.first_name || null;
+    if (/last.?name|surname|family.?name/.test(l)) return profile.last_name || null;
     if (/full.?name/.test(l))
-        return [profile.first_name, profile.last_name].filter(Boolean).join(" ");
-    if (/email/.test(l)) return profile.email;
-    if (/phone|mobile|cell/.test(l)) return profile.phone;
-    if (/linkedin/.test(l)) return profile.linkedin_url;
-    if (/github/.test(l)) return profile.github_url;
-    if (/portfolio|website|personal.?site/.test(l)) return profile.portfolio_url;
-    if (/city/.test(l)) return profile.city;
-    if (/state|province/.test(l)) return profile.state;
-    if (/zip|postal/.test(l)) return profile.zip_code;
-    if (/country/.test(l)) return profile.country;
-    if (/address.?1|street/.test(l)) return profile.address_line1;
-    if (/address.?2|apt|suite/.test(l)) return profile.address_line2;
+        return [profile.first_name, profile.last_name].filter(Boolean).join(" ") || null;
+    if (/email/.test(l)) return profile.email || null;
+    if (/phone|mobile|cell/.test(l)) return profile.phone || null;
+    if (/linkedin/.test(l)) return profile.linkedin_url || null;
+    if (/github/.test(l)) return profile.github_url || null;
+    if (/portfolio|website|personal.?site/.test(l)) return profile.portfolio_url || null;
+    if (/city/.test(l)) return profile.city || null;
+    if (/state|province/.test(l)) return profile.state || null;
+    if (/zip|postal/.test(l)) return profile.zip_code || null;
+    if (/country/.test(l)) return profile.country || null;
+    if (/address.?1|street/.test(l)) return profile.address_line1 || null;
+    if (/address.?2|apt|suite/.test(l)) return null; // not collected
 
-    if (/sponsorship|visa.?sponsor|require.?sponsor/.test(l))
-        return profile.sponsorship_needed ? "Yes" : "No";
-    if (/authorized|legally.?eligible|right.?to.?work|work.?auth/.test(l))
-        return profile.authorized_to_work ? "Yes" : "No";
+    // Work authorization — stored as boolean in DB
+    if (/sponsorship|visa.?sponsor|require.?sponsor/.test(l)) {
+        const val = profile.requires_sponsorship_now ?? profile.requires_sponsorship_future;
+        if (val == null) return null;
+        return val ? "Yes" : "No";
+    }
+    if (/authorized|legally.?eligible|right.?to.?work|work.?auth/.test(l)) {
+        const val = profile.work_authorized;
+        if (val == null) return null;
+        return val ? "Yes" : "No";
+    }
+
+    // EEO demographics — return stored string value directly
+    if (/\bgender\b/.test(l)) return profile.gender || null;
+    if (/race|ethnicity/.test(l)) return profile.race || null;
+    if (/veteran/.test(l)) return profile.veteran_status || null;
+    if (/disability|disabled/.test(l)) return profile.disability_status || null;
+
+    // Background questions
+    if (/how did you hear|referral source|how did you find/.test(l)) return profile.heard_from || null;
+    if (/work.?prefer|remote|hybrid|on.?site/.test(l)) return profile.work_preference || null;
+    if (/18 or older|18\+|over 18/.test(l)) return profile.is_18_or_older ? "Yes" : "No";
+    if (/relocat/.test(l)) return profile.willing_to_relocate ? "Yes" : "No";
 
     return null;
 }

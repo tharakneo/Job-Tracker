@@ -15,7 +15,15 @@ drop policy if exists "Allow anonymous select" on public.jobs;
 drop policy if exists "Allow anonymous insert" on public.jobs;
 drop policy if exists "Allow anonymous update" on public.jobs;
 drop policy if exists "Allow anonymous delete" on public.jobs;
-drop policy if exists "authenticated insert jobs" on public.jobs;
+drop policy if exists "authenticated insert jobs" on public.jobs;worked 
+
+now its time to change the auto fill 
+
+we'll do it one by one 
+
+keep only the importatnt ones 
+
+i think 
 drop policy if exists "users can select own jobs" on public.jobs;
 drop policy if exists "users can insert own jobs" on public.jobs;
 drop policy if exists "users can update own jobs" on public.jobs;

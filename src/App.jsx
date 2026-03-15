@@ -169,61 +169,33 @@ const ProfileIcon = () => (
 
 const AUTOFILL_STORAGE_KEY = 'jt-autofill'
 const AUTOFILL_MODULES = [
-  { id: 'profile', label: 'Profile' },
-  { id: 'work', label: 'Work' },
-  { id: 'education', label: 'Education' },
-  { id: 'eeo', label: 'EEO' },
-  { id: 'skills', label: 'Skills' },
+  { id: 'personal',    label: 'Personal' },
+  { id: 'work_auth',  label: 'Work Auth' },
+  { id: 'eeo',        label: 'EEO' },
+  { id: 'background', label: 'Background' },
 ]
-
-function createWorkExperienceItem() {
-  return {
-    id: crypto.randomUUID(),
-    role: '',
-    company: '',
-    location: '',
-    startDate: '',
-    endDate: '',
-    summary: '',
-  }
-}
-
-function createEducationItem() {
-  return {
-    id: crypto.randomUUID(),
-    school: '',
-    degree: '',
-    field: '',
-    startDate: '',
-    endDate: '',
-    gpa: '',
-  }
-}
 
 function defaultAutofillData() {
   return {
-    firstName: '',
-    lastName: '',
-    email: '',
-    phone: '',
-    city: '',
-    state: '',
-    zip: '',
-    country: '',
-    linkedin: '',
-    github: '',
-    portfolio: '',
-    summary: '',
-    resumeText: '',
-    authorizedToWork: 'Yes',
-    sponsorshipNeeded: 'No',
+    // Section 1 — Personal Info
+    firstName: '', lastName: '', email: '', phone: '',
+    linkedin: '', portfolio: '', github: '',
+    addressLine1: '', city: '', state: '', zip: '', country: 'United States',
+    // Section 2 — Work Authorization
+    workAuthorized: true,
+    requiresSponsorshipNow: false,
+    requiresSponsorshipFuture: true,
+    visaType: '',
+    // Section 3 — EEO / Demographics
     gender: 'Prefer not to say',
     race: 'Prefer not to say',
     veteranStatus: 'Prefer not to say',
     disabilityStatus: 'Prefer not to say',
-    skills: [''],
-    workExperience: [createWorkExperienceItem()],
-    education: [createEducationItem()],
+    // Section 4 — Background Questions
+    heardFrom: 'LinkedIn',
+    is18OrOlder: true,
+    willingToRelocate: false,
+    workPreference: 'Hybrid',
   }
 }
 
@@ -234,56 +206,42 @@ function parseStoredJSON(key, fallback) {
 function normalizeAutofillData(raw) {
   const base = defaultAutofillData()
   const data = raw && typeof raw === 'object' ? raw : {}
-
-  const workExperience = Array.isArray(data.workExperience) && data.workExperience.length > 0
-    ? data.workExperience.map(item => ({
-      ...createWorkExperienceItem(),
-      ...item,
-      id: item?.id || crypto.randomUUID(),
-    }))
-    : base.workExperience
-
-  const education = Array.isArray(data.education) && data.education.length > 0
-    ? data.education.map(item => ({
-      ...createEducationItem(),
-      ...item,
-      id: item?.id || crypto.randomUUID(),
-    }))
-    : base.education
-
-  const skills = Array.isArray(data.skills) && data.skills.length > 0
-    ? data.skills.map(skill => String(skill || ''))
-    : base.skills
-
-  return {
-    ...base,
-    ...data,
-    workExperience,
-    education,
-    skills,
+  const merged = { ...base, ...data }
+  // Coerce booleans — DB may return true/false, old storage may have "Yes"/"No"
+  const coerceBool = (val, fallback) => {
+    if (typeof val === 'boolean') return val
+    if (val === 'Yes' || val === 'true') return true
+    if (val === 'No' || val === 'false') return false
+    return fallback
   }
+  merged.workAuthorized = coerceBool(merged.workAuthorized, base.workAuthorized)
+  merged.requiresSponsorshipNow = coerceBool(merged.requiresSponsorshipNow, base.requiresSponsorshipNow)
+  merged.requiresSponsorshipFuture = coerceBool(merged.requiresSponsorshipFuture, base.requiresSponsorshipFuture)
+  merged.is18OrOlder = coerceBool(merged.is18OrOlder, base.is18OrOlder)
+  merged.willingToRelocate = coerceBool(merged.willingToRelocate, base.willingToRelocate)
+  return merged
 }
 
 function countFilled(values) {
-  return values.filter(value => String(value || '').trim()).length
+  return values.filter(value => {
+    if (typeof value === 'boolean') return true
+    return String(value || '').trim().length > 0
+  }).length
 }
 
 function getAutofillModuleCounts(data) {
-  const profileCount = countFilled([
+  const personalCount = countFilled([
     data.firstName, data.lastName, data.email, data.phone,
-    data.city, data.state, data.linkedin, data.portfolio,
+    data.linkedin, data.city, data.state, data.zip,
   ])
-  const workCount = data.workExperience.filter(item => item.role || item.company).length
-  const educationCount = data.education.filter(item => item.school || item.degree).length
-  const eeoCount = countFilled([data.authorizedToWork, data.sponsorshipNeeded, data.gender, data.race, data.veteranStatus, data.disabilityStatus])
-  const skillsCount = data.skills.filter(skill => skill.trim()).length
+  const eeoFilled = [data.gender, data.race, data.veteranStatus, data.disabilityStatus]
+    .filter(v => v && v !== 'Prefer not to say').length
 
   return {
-    profile: `${profileCount}/8`,
-    work: workCount || 0,
-    education: educationCount || 0,
-    eeo: `${eeoCount}/6`,
-    skills: skillsCount || 0,
+    personal:    `${personalCount}/8`,
+    work_auth:   data.visaType ? '✓' : '—',
+    eeo:         eeoFilled > 0 ? `${eeoFilled}/4` : '—',
+    background:  data.workPreference || '—',
   }
 }
 
@@ -335,7 +293,7 @@ function parseCSV(text) {
 export default function App() {
   const [jobs, setJobs] = useState([])
   const [activeStatus, setActiveStatus] = useState('Applied')
-  const [activeAutofillModule, setActiveAutofillModule] = useState('profile')
+  const [activeAutofillModule, setActiveAutofillModule] = useState('personal')
   const [search, setSearch] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [toast, setToast] = useState(null)
@@ -346,7 +304,7 @@ export default function App() {
   const [user, setUser] = useState(null)
   const [authReady, setAuthReady] = useState(false)
   const [showProfileMenu, setShowProfileMenu] = useState(false)
-  const [activePanel, setActivePanel] = useState(null) // 'profile' | 'autofill' | null
+  const [activePanel, setActivePanel] = useState(null) // 'autofill' | null
   const [autofillData, setAutofillData] = useState(() => normalizeAutofillData(parseStoredJSON(AUTOFILL_STORAGE_KEY, {})))
   const [autofillSaving, setAutofillSaving] = useState(false)
   const profileMenuRef = useRef(null)
@@ -416,6 +374,10 @@ export default function App() {
     setShowFab(false)
     setOpenMenu(null)
     setSelectMode(false)
+    // Always reset to first module when opening autofill panel
+    setActiveAutofillModule(prev =>
+      AUTOFILL_MODULES.some(m => m.id === prev) ? prev : 'personal'
+    )
   }, [activePanel])
 
   useEffect(() => {
@@ -733,7 +695,6 @@ export default function App() {
                   <span>{user.email}</span>
                 </div>
                 <div className="dropdown-divider" />
-                <button onClick={() => { setActivePanel('profile'); setShowProfileMenu(false) }}>Profile</button>
                 <button onClick={() => { setActiveAutofillModule('profile'); setActivePanel('autofill'); setShowProfileMenu(false) }}>Autofill</button>
                 <div className="dropdown-divider" />
                 <button className="destructive" onClick={signOut}>Sign out</button>
@@ -749,10 +710,6 @@ export default function App() {
               </>
             )}
           </div>
-        )}
-
-        {activePanel === 'profile' && (
-          <ProfilePanel user={user} onClose={() => setActivePanel(null)} />
         )}
       </div>
 
@@ -772,7 +729,6 @@ export default function App() {
                 </button>
               ))}
             </nav>
-            <button className="sidebar-back-btn" onClick={() => setActivePanel(null)}>Back to Jobs</button>
           </>
         ) : (
           <nav className="sidebar-nav">
@@ -1183,129 +1139,59 @@ function PolaroidImage({ image, onUpdate, onDelete }) {
   )
 }
 
+// Map website camelCase keys to Supabase profiles column names
+const AUTOFILL_TO_DB = {
+  firstName: 'first_name', lastName: 'last_name', email: 'email', phone: 'phone',
+  addressLine1: 'address_line1',
+  linkedin: 'linkedin_url', github: 'github_url', portfolio: 'portfolio_url',
+  city: 'city', state: 'state', zip: 'zip_code', country: 'country',
+  workAuthorized: 'work_authorized',
+  requiresSponsorshipNow: 'requires_sponsorship_now',
+  requiresSponsorshipFuture: 'requires_sponsorship_future',
+  visaType: 'visa_type',
+  gender: 'gender', race: 'race',
+  veteranStatus: 'veteran_status', disabilityStatus: 'disability_status',
+  heardFrom: 'heard_from',
+  is18OrOlder: 'is_18_or_older',
+  willingToRelocate: 'willing_to_relocate',
+  workPreference: 'work_preference',
+}
+const DB_TO_AUTOFILL = Object.fromEntries(Object.entries(AUTOFILL_TO_DB).map(([k, v]) => [v, k]))
 
-function ProfilePanel({ user, onClose }) {
-  const [data, setData] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('jt-profile') || '{}') } catch { return {} }
-  })
-
-  function set(key, val) { setData(prev => ({ ...prev, [key]: val })) }
-
-  function save() {
-    localStorage.setItem('jt-profile', JSON.stringify(data))
-    onClose()
-  }
-
+function Toggle({ value, onChange }) {
   return (
-    <div className="profile-panel">
-      <div className="profile-panel-header">
-        <span className="profile-panel-title">Profile</span>
-        <button className="panel-close" onClick={onClose}>&times;</button>
-      </div>
-      <div className="profile-scroll-area">
-        <div className="form-row">
-          <div className="form-group">
-            <label>First Name</label>
-            <input value={data.firstName || ''} onChange={e => set('firstName', e.target.value)} placeholder="First" />
-          </div>
-          <div className="form-group">
-            <label>Last Name</label>
-            <input value={data.lastName || ''} onChange={e => set('lastName', e.target.value)} placeholder="Last" />
-          </div>
-        </div>
-        <div className="form-group">
-          <label>Email</label>
-          <input value={user?.email || data.email || ''} onChange={e => set('email', e.target.value)} placeholder="you@email.com" readOnly={!!user?.email} style={user?.email ? { opacity: 0.5 } : {}} />
-        </div>
-        <div className="form-group">
-          <label>Phone</label>
-          <input value={data.phone || ''} onChange={e => set('phone', e.target.value)} placeholder="+1 (555) 000-0000" />
-        </div>
-        <div className="form-row">
-          <div className="form-group">
-            <label>City</label>
-            <input value={data.city || ''} onChange={e => set('city', e.target.value)} placeholder="City" />
-          </div>
-          <div className="form-group">
-            <label>State</label>
-            <input value={data.state || ''} onChange={e => set('state', e.target.value)} placeholder="State" />
-          </div>
-        </div>
-        <div className="form-group">
-          <label>LinkedIn</label>
-          <input value={data.linkedin || ''} onChange={e => set('linkedin', e.target.value)} placeholder="linkedin.com/in/yourname" />
-        </div>
-        <div className="form-group">
-          <label>Portfolio / Website</label>
-          <input value={data.website || ''} onChange={e => set('website', e.target.value)} placeholder="yoursite.com" />
-        </div>
-      </div>
-      <div className="profile-footer" style={{ display: 'flex' }}>
-        <button className="btn-cancel" onClick={onClose}>Cancel</button>
-        <button className="btn-save" onClick={save}>Save</button>
-      </div>
+    <button
+      type="button"
+      className={`af-toggle${value ? ' af-toggle-on' : ''}`}
+      onClick={() => onChange(!value)}
+      role="switch"
+      aria-checked={value}
+    >
+      <span className="af-toggle-thumb" />
+    </button>
+  )
+}
+
+function ToggleRow({ label, value, onChange }) {
+  return (
+    <div className="af-toggle-row">
+      <span className="af-toggle-label">{label}</span>
+      <Toggle value={value} onChange={onChange} />
     </div>
   )
 }
 
+function AutofillWorkspace({ data, setData, activeModule: activeModuleProp, onClose, onSave, saving }) {
+  // Fall back to 'personal' if an unrecognised module id is passed (e.g. stale HMR state)
+  const activeModule = AUTOFILL_MODULES.some(m => m.id === activeModuleProp)
+    ? activeModuleProp
+    : 'personal'
 
-// Map website camelCase keys to Supabase profiles column names
-const AUTOFILL_TO_DB = {
-  firstName: 'first_name', lastName: 'last_name', email: 'email', phone: 'phone',
-  linkedin: 'linkedin_url', github: 'github_url', portfolio: 'portfolio_url',
-  city: 'city', state: 'state', zip: 'zip_code', country: 'country',
-  authorizedToWork: 'authorized_to_work',
-  sponsorshipNeeded: 'sponsorship_needed',
-  gender: 'gender',
-  race: 'race',
-  veteranStatus: 'veteran_status',
-  disabilityStatus: 'disability_status',
-  resumeText: 'resume_text',
-}
-const DB_TO_AUTOFILL = Object.fromEntries(Object.entries(AUTOFILL_TO_DB).map(([k, v]) => [v, k]))
-
-function AutofillWorkspace({ data, setData, activeModule, onClose, onSave, saving }) {
-  function setField(key, value) {
+  function set(key, value) {
     setData(prev => ({ ...prev, [key]: value }))
   }
 
-  function updateCollection(key, id, updates) {
-    setData(prev => ({
-      ...prev,
-      [key]: prev[key].map(item => item.id === id ? { ...item, ...updates } : item),
-    }))
-  }
-
-  function addCollectionItem(key, factory) {
-    setData(prev => ({ ...prev, [key]: [...prev[key], factory()] }))
-  }
-
-  function removeCollectionItem(key, id) {
-    setData(prev => ({
-      ...prev,
-      [key]: prev[key].length > 1 ? prev[key].filter(item => item.id !== id) : prev[key],
-    }))
-  }
-
-  function updateSkill(index, value) {
-    setData(prev => ({
-      ...prev,
-      skills: prev.skills.map((skill, skillIndex) => skillIndex === index ? value : skill),
-    }))
-  }
-
-  function addSkill() {
-    setData(prev => ({ ...prev, skills: [...prev.skills, ''] }))
-  }
-
-  function removeSkill(index) {
-    setData(prev => ({
-      ...prev,
-      skills: prev.skills.length > 1 ? prev.skills.filter((_, skillIndex) => skillIndex !== index) : prev.skills,
-    }))
-  }
-
-  const moduleLabel = AUTOFILL_MODULES.find(m => m.id === activeModule)?.label || 'Autofill'
+  const moduleLabel = AUTOFILL_MODULES.find(m => m.id === activeModule)?.label || 'Personal'
 
   return (
     <>
@@ -1317,147 +1203,98 @@ function AutofillWorkspace({ data, setData, activeModule, onClose, onSave, savin
       </div>
 
       <div className="jobs-list autofill-form">
-        {activeModule === 'profile' && (
+
+        {activeModule === 'personal' && (
           <>
             <div className="form-row">
-              <div className="form-group"><label>First Name</label><input value={data.firstName} onChange={e => setField('firstName', e.target.value)} placeholder="First" /></div>
-              <div className="form-group"><label>Last Name</label><input value={data.lastName} onChange={e => setField('lastName', e.target.value)} placeholder="Last" /></div>
+              <div className="form-group"><label>First Name</label><input value={data.firstName} onChange={e => set('firstName', e.target.value)} placeholder="First" /></div>
+              <div className="form-group"><label>Last Name</label><input value={data.lastName} onChange={e => set('lastName', e.target.value)} placeholder="Last" /></div>
             </div>
             <div className="form-row">
-              <div className="form-group"><label>Email</label><input value={data.email} onChange={e => setField('email', e.target.value)} placeholder="you@email.com" /></div>
-              <div className="form-group"><label>Phone</label><input value={data.phone} onChange={e => setField('phone', e.target.value)} placeholder="+1 (555) 000-0000" /></div>
+              <div className="form-group"><label>Email</label><input value={data.email} onChange={e => set('email', e.target.value)} placeholder="you@email.com" /></div>
+              <div className="form-group"><label>Phone</label><input value={data.phone} onChange={e => set('phone', e.target.value)} placeholder="+1 (555) 000-0000" /></div>
+            </div>
+            <div className="form-group"><label>LinkedIn URL</label><input value={data.linkedin} onChange={e => set('linkedin', e.target.value)} placeholder="linkedin.com/in/yourname" /></div>
+            <div className="form-row">
+              <div className="form-group"><label>Portfolio / Website</label><input value={data.portfolio} onChange={e => set('portfolio', e.target.value)} placeholder="yourwebsite.com" /></div>
+              <div className="form-group"><label>GitHub URL</label><input value={data.github} onChange={e => set('github', e.target.value)} placeholder="github.com/yourname" /></div>
+            </div>
+            <div className="form-group"><label>Address Line 1</label><input value={data.addressLine1 || ''} onChange={e => set('addressLine1', e.target.value)} placeholder="123 Main St" /></div>
+            <div className="form-row">
+              <div className="form-group"><label>City</label><input value={data.city} onChange={e => set('city', e.target.value)} placeholder="City" /></div>
+              <div className="form-group"><label>State</label><input value={data.state} onChange={e => set('state', e.target.value)} placeholder="State" /></div>
             </div>
             <div className="form-row">
-              <div className="form-group"><label>City</label><input value={data.city} onChange={e => setField('city', e.target.value)} placeholder="City" /></div>
-              <div className="form-group"><label>State</label><input value={data.state} onChange={e => setField('state', e.target.value)} placeholder="State" /></div>
+              <div className="form-group"><label>Zip Code</label><input value={data.zip} onChange={e => set('zip', e.target.value)} placeholder="10001" /></div>
+              <div className="form-group"><label>Country</label><input value={data.country} onChange={e => set('country', e.target.value)} placeholder="United States" /></div>
             </div>
-            <div className="form-row">
-              <div className="form-group"><label>ZIP</label><input value={data.zip} onChange={e => setField('zip', e.target.value)} placeholder="10001" /></div>
-              <div className="form-group"><label>Country</label><input value={data.country} onChange={e => setField('country', e.target.value)} placeholder="United States" /></div>
-            </div>
-            <div className="form-group"><label>LinkedIn</label><input value={data.linkedin} onChange={e => setField('linkedin', e.target.value)} placeholder="linkedin.com/in/yourname" /></div>
-            <div className="form-row">
-              <div className="form-group"><label>GitHub</label><input value={data.github} onChange={e => setField('github', e.target.value)} placeholder="github.com/yourname" /></div>
-              <div className="form-group"><label>Portfolio</label><input value={data.portfolio} onChange={e => setField('portfolio', e.target.value)} placeholder="yourwebsite.com" /></div>
-            </div>
-            <div className="form-group"><label>Summary</label><textarea rows="3" value={data.summary} onChange={e => setField('summary', e.target.value)} placeholder="2-3 lines about your focus and target roles." /></div>
-            <div className="form-group"><label>Resume Text</label><textarea rows="5" value={data.resumeText} onChange={e => setField('resumeText', e.target.value)} placeholder="Paste plain-text resume for autofill context." /></div>
           </>
         )}
 
-        {activeModule === 'work' && (
+        {activeModule === 'work_auth' && (
           <>
-            {data.workExperience.map((item, index) => (
-              <div key={item.id} className="autofill-module-card">
-                <div className="autofill-module-card-head">
-                  <strong>Role {index + 1}</strong>
-                  <button className="module-remove-btn" onClick={() => removeCollectionItem('workExperience', item.id)}>Remove</button>
-                </div>
-                <div className="form-row">
-                  <div className="form-group"><label>Title</label><input value={item.role} onChange={e => updateCollection('workExperience', item.id, { role: e.target.value })} placeholder="Software Engineer" /></div>
-                  <div className="form-group"><label>Company</label><input value={item.company} onChange={e => updateCollection('workExperience', item.id, { company: e.target.value })} placeholder="Tesla" /></div>
-                </div>
-                <div className="form-row">
-                  <div className="form-group"><label>Location</label><input value={item.location} onChange={e => updateCollection('workExperience', item.id, { location: e.target.value })} placeholder="Fremont, CA" /></div>
-                  <div className="form-group"><label>Start</label><input value={item.startDate} onChange={e => updateCollection('workExperience', item.id, { startDate: e.target.value })} placeholder="May 2025" /></div>
-                  <div className="form-group"><label>End</label><input value={item.endDate} onChange={e => updateCollection('workExperience', item.id, { endDate: e.target.value })} placeholder="Present" /></div>
-                </div>
-                <div className="form-group"><label>Bullets</label><textarea rows="4" value={item.summary} onChange={e => updateCollection('workExperience', item.id, { summary: e.target.value })} placeholder="Built X, improved Y by Z%..." /></div>
-              </div>
-            ))}
-            <button className="module-add-btn" onClick={() => addCollectionItem('workExperience', createWorkExperienceItem)}>+ Add Role</button>
-          </>
-        )}
-
-        {activeModule === 'education' && (
-          <>
-            {data.education.map((item, index) => (
-              <div key={item.id} className="autofill-module-card">
-                <div className="autofill-module-card-head">
-                  <strong>School {index + 1}</strong>
-                  <button className="module-remove-btn" onClick={() => removeCollectionItem('education', item.id)}>Remove</button>
-                </div>
-                <div className="form-group"><label>School</label><input value={item.school} onChange={e => updateCollection('education', item.id, { school: e.target.value })} placeholder="UC Berkeley" /></div>
-                <div className="form-row">
-                  <div className="form-group"><label>Degree</label><input value={item.degree} onChange={e => updateCollection('education', item.id, { degree: e.target.value })} placeholder="B.S." /></div>
-                  <div className="form-group"><label>Field</label><input value={item.field} onChange={e => updateCollection('education', item.id, { field: e.target.value })} placeholder="Computer Science" /></div>
-                  <div className="form-group"><label>GPA</label><input value={item.gpa} onChange={e => updateCollection('education', item.id, { gpa: e.target.value })} placeholder="3.8" /></div>
-                </div>
-                <div className="form-row">
-                  <div className="form-group"><label>Start</label><input value={item.startDate} onChange={e => updateCollection('education', item.id, { startDate: e.target.value })} placeholder="2022" /></div>
-                  <div className="form-group"><label>End</label><input value={item.endDate} onChange={e => updateCollection('education', item.id, { endDate: e.target.value })} placeholder="2026" /></div>
-                </div>
-              </div>
-            ))}
-            <button className="module-add-btn" onClick={() => addCollectionItem('education', createEducationItem)}>+ Add School</button>
+            <ToggleRow label="Authorized to work in US?" value={data.workAuthorized} onChange={v => set('workAuthorized', v)} />
+            <ToggleRow label="Require sponsorship now?" value={data.requiresSponsorshipNow} onChange={v => set('requiresSponsorshipNow', v)} />
+            <ToggleRow label="Require sponsorship in future?" value={data.requiresSponsorshipFuture} onChange={v => set('requiresSponsorshipFuture', v)} />
+            <div className="form-group" style={{ marginTop: '20px' }}>
+              <label>Visa Type</label>
+              <input value={data.visaType || ''} onChange={e => set('visaType', e.target.value)} placeholder="e.g. F-1 OPT, H-1B" />
+            </div>
           </>
         )}
 
         {activeModule === 'eeo' && (
           <>
-            <div className="form-row">
-              <div className="form-group"><label>Authorized to Work</label>
-                <select value={data.authorizedToWork} onChange={e => setField('authorizedToWork', e.target.value)}>
-                  <option>Yes</option><option>No</option><option>Prefer not to say</option>
-                </select>
-              </div>
-              <div className="form-group"><label>Need Sponsorship</label>
-                <select value={data.sponsorshipNeeded} onChange={e => setField('sponsorshipNeeded', e.target.value)}>
-                  <option>No</option><option>Yes</option><option>Prefer not to say</option>
-                </select>
-              </div>
+            <div className="form-group"><label>Gender</label>
+              <select value={data.gender} onChange={e => set('gender', e.target.value)}>
+                <option>Male</option><option>Female</option><option>Non-binary</option><option>Prefer not to say</option>
+              </select>
             </div>
-            <div className="form-row">
-              <div className="form-group"><label>Gender</label>
-                <select value={data.gender} onChange={e => setField('gender', e.target.value)}>
-                  <option>Prefer not to say</option><option>Male</option><option>Female</option><option>Non-binary</option><option>Other</option>
-                </select>
-              </div>
-              <div className="form-group"><label>Race / Ethnicity</label>
-                <select value={data.race} onChange={e => setField('race', e.target.value)}>
-                  <option>Prefer not to say</option>
-                  <option>American Indian or Alaska Native</option>
-                  <option>Asian</option>
-                  <option>Black or African American</option>
-                  <option>Hispanic or Latino</option>
-                  <option>Native Hawaiian or Other Pacific Islander</option>
-                  <option>White</option>
-                  <option>Two or More Races</option>
-                </select>
-              </div>
+            <div className="form-group"><label>Race / Ethnicity</label>
+              <select value={data.race} onChange={e => set('race', e.target.value)}>
+                <option>Asian</option>
+                <option>White</option>
+                <option>Hispanic or Latino</option>
+                <option>Black or African American</option>
+                <option>Two or more races</option>
+                <option>Prefer not to say</option>
+              </select>
             </div>
-            <div className="form-row">
-              <div className="form-group"><label>Veteran Status</label>
-                <select value={data.veteranStatus} onChange={e => setField('veteranStatus', e.target.value)}>
-                  <option>Prefer not to say</option>
-                  <option>I am not a protected veteran</option>
-                  <option>I identify as a protected veteran</option>
-                </select>
-              </div>
-              <div className="form-group"><label>Disability Status</label>
-                <select value={data.disabilityStatus} onChange={e => setField('disabilityStatus', e.target.value)}>
-                  <option>Prefer not to say</option>
-                  <option>No, I do not have a disability</option>
-                  <option>Yes, I have a disability</option>
-                </select>
-              </div>
+            <div className="form-group"><label>Veteran Status</label>
+              <select value={data.veteranStatus} onChange={e => set('veteranStatus', e.target.value)}>
+                <option>I am not a protected veteran</option>
+                <option>I am a protected veteran</option>
+                <option>Prefer not to say</option>
+              </select>
+            </div>
+            <div className="form-group"><label>Disability Status</label>
+              <select value={data.disabilityStatus} onChange={e => set('disabilityStatus', e.target.value)}>
+                <option>No, I do not have a disability</option>
+                <option>Yes, I have a disability</option>
+                <option>Prefer not to say</option>
+              </select>
             </div>
           </>
         )}
 
-        {activeModule === 'skills' && (
+        {activeModule === 'background' && (
           <>
-            <div className="autofill-skills-grid">
-              {data.skills.map((skill, index) => (
-                <div key={`${index}-${skill}`} className="autofill-skill-row">
-                  <input value={skill} onChange={e => updateSkill(index, e.target.value)} placeholder="React, SQL, Python..." />
-                  <button className="module-remove-btn" onClick={() => removeSkill(index)}>Remove</button>
-                </div>
-              ))}
+            <div className="form-group"><label>How did you hear about us?</label>
+              <select value={data.heardFrom} onChange={e => set('heardFrom', e.target.value)}>
+                <option>LinkedIn</option><option>Indeed</option><option>Handshake</option>
+                <option>Company Website</option><option>Referral</option><option>Other</option>
+              </select>
             </div>
-            <button className="module-add-btn" onClick={addSkill}>+ Add Skill</button>
+            <div className="form-group"><label>Work Preference</label>
+              <select value={data.workPreference} onChange={e => set('workPreference', e.target.value)}>
+                <option>Remote</option><option>Hybrid</option><option>On-site</option>
+              </select>
+            </div>
+            <ToggleRow label="Are you 18 or older?" value={data.is18OrOlder} onChange={v => set('is18OrOlder', v)} />
+            <ToggleRow label="Willing to relocate?" value={data.willingToRelocate} onChange={v => set('willingToRelocate', v)} />
           </>
         )}
+
       </div>
     </>
   )

@@ -66,7 +66,7 @@ const WorkdayAdapter = {
         if (authSection && !this._filled.has("workAuth")) {
             const radios = authSection.querySelectorAll("input[type='radio']");
             if (radios.length) {
-                const answer = profile.authorized_to_work ? "yes" : "no";
+                const answer = profile.work_authorized ? "yes" : "no";
                 nativeClickOption(radios, answer);
                 this._filled.add("workAuth");
             }
@@ -77,7 +77,7 @@ const WorkdayAdapter = {
         if (sponsorSection && !this._filled.has("sponsorship")) {
             const radios = sponsorSection.querySelectorAll("input[type='radio']");
             if (radios.length) {
-                const answer = profile.sponsorship_needed ? "yes" : "no";
+                const answer = profile.requires_sponsorship_now ? "yes" : "no";
                 nativeClickOption(radios, answer);
                 this._filled.add("sponsorship");
             }
